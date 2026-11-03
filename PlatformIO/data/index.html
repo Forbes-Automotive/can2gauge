@@ -277,7 +277,7 @@
             <button class="nav-tab active" data-page="dashboard">Dashboard</button>
             <button class="nav-tab" data-page="gauges">Gauges</button>
             <button class="nav-tab" data-page="log">Log</button>
-            <button class="nav-tab" data-page="nav">Navigation</button> <!-- 0.30.5: own tab (was on Bluetooth OBD) -->
+            <button class="nav-tab" data-page="nav" data-menu="nav">Navigation</button> <!-- hidden with Settings > Device > Menu and Tabs -->
             <button class="nav-tab" data-page="can" data-menu="can">CAN</button>
             <button class="nav-tab" data-page="haldex" data-menu="haldex">OpenHaldex</button>
             <button class="nav-tab" data-page="adc" data-menu="adc">ADC</button>
@@ -1137,14 +1137,14 @@
                 <div class="mono" id="chainNodes">--</div>
             </section>
             <section class="card">
-                <h2>Update Other Gauges</h2>
+                <h2>Update All Gauges</h2>
                 <div class="state-line">This gauge: <b id="chainUpdState">--</b></div>
                 <div class="mono" id="chainUpdList">--</div>
                 <div class="row-inline">
-                    <button class="btn" data-action="chainUpdate" style="flex:0 1 220px">Update Other Gauges</button>
+                    <button class="btn" data-action="chainUpdate" style="flex:0 1 220px">Update All Gauges</button>
                     <button class="btn-secondary" data-action="chainUpdateStop" style="flex:0 1 120px">Stop</button>
                 </div>
-                <div class="help">Sends this gauge's firmware and web pages to the other gauges in the chain over ESP-NOW, one gauge at a time (about a minute each). Only files that differ are sent, and each gauge keeps its own files (.ecu, logs). Car parked, the same group on every gauge, and each gauge on 0.25.0 or later (an older one needs one update from its own web page first).</div>
+                <div class="help">Brings every gauge in the chain up to the newest firmware, from whichever gauge you're on: the gauge with the newest firmware sends its firmware and web pages to the others over ESP-NOW, one gauge at a time (about a minute each). Only files that differ are sent, and each gauge keeps its own files (.ecu, logs). Car parked, the same group on every gauge, and each gauge on 0.25.0 or later (an older one needs one update from its own web page first).</div>
             </section>
         </div>
 

@@ -25,6 +25,9 @@ bool lvglTouchPresent();
 uint32_t lvglFps();
 bool lvglReady();         // false = the display didn't come up; the gauge runs without the screen (lvglLock refuses)
 void lvglTouchRedetect(); // look for the touch controller again (done in the LVGL task at its next touch read)
+// 0.38.8: ends a screen animation LVGL is running (a page change it slides itself) at once, so it holds on to no screen
+// that is about to be deleted. Call before deleting screens; the caller holds the LVGL lock.
+void lvglFinishScreenAnimation();
 // 0.38.0: a pretend finger (Dashboard > Gauge Control, until the screens have touch), through the touch input: a tap,
 // double-tap or long press (held longHoldMs) in the middle of the screen, or a swipe across it
 #define LVGL_FAKE_TAP 1
@@ -60,3 +63,6 @@ bool lvglDipTo(lv_obj_t *screen, uint32_t ms, bool deleteOld); // backlight down
 bool lvglFadeTo(lv_obj_t *screen, uint32_t ms, bool deleteOld); // 0.24.24: a true cross-fade (pixels mixed)
 uint32_t lvglLastTransitionFrames(); // the last slide's (or cross-fade's) frames ...
 uint32_t lvglLastTransitionMs();     // ... and how long it took
+// the bench screen grab (USB console, tools/diag/screen_grab.py): the frame buffer on the glass (true) or the other one
+// (false), DISPLAY_WIDTH x DISPLAY_HEIGHT RGB565. NULL = none. Read it with lvglLock held.
+const uint16_t *lvglScreenBuffer(bool isOnGlass);

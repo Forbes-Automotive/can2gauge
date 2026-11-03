@@ -19,6 +19,8 @@ static uint8_t broadcastParts = 0;                            // which pieces ar
 static volatile bool broadcastReady = false;                  // all three in: vehicleTick decodes it
 static volatile bool canReadWanted = false;                   // a VIN read over the CAN was asked for
 static volatile bool canReadBusy = false;                     // ... and isn't done yet
+static char foundVin[18];                                     // the VIN that read found, for vehicleTick to take
+static volatile bool hasFoundVin = false;                     // foundVin is waiting
 static void saveCar();                                        // below: writes the car to NVS
 static void deleteCarLogo();                                  // below: deletes My Car's boot picture
 
@@ -511,8 +513,12 @@ void vehicleTakeVin(const char *vin, uint8_t source, bool oldCycle)
     deleteCarLogo();
     DEBUG("Vehicle: My Car set from the VIN: %s %s", fromVin.make, fromVin.model);
   }
-  // Match car: the generation decides the illumination (a late Golf V is still blue), so its year wins over the VIN's
-  if (modelYear && car.confirmed != CAR_FROM_DRIVER)
+  // Match car: the generation decides the illumination (a late Golf V is still blue), so its year wins over the VIN's.
+  // Only for My Car's own VIN (or no car saved yet): a dongle tried in a friend's car mustn't re-theme the gauge.
+  CarChoice myCar;
+  vehicleCarCopy(myCar);
+  const bool isMyCar = myCar.confirmed == CAR_NOT_SET || strcmp(myCar.vin, info.vin) == 0;
+  if (modelYear && myCar.confirmed != CAR_FROM_DRIVER && isMyCar)
   {
     themeVehicleDetected(info.makeKey, modelYear);
   }
@@ -582,6 +588,14 @@ static void canHook(const twai_message_t &message)
 
 void vehicleTick()
 {
+  // the VIN read over the CAN: taken here, as taking it can save My Car and redraw every screen for Match Car, too
+  // much for the VAG diag task's 4 KB stack. The read counts as done once the car is taken, so the web UI sees it.
+  if (hasFoundVin)
+  {
+    vehicleTakeVin(foundVin, VIN_SRC_CAN_OBD, false);
+    hasFoundVin = false;
+    canReadBusy = false;
+  }
   if (!broadcastReady)
   {
     return;
@@ -723,6 +737,13 @@ void vehicleCanReadDone(bool found)
   (void)found;
   canReadWanted = false;
   canReadBusy = false;
+}
+
+void vehicleCanReadFound(const char *vin)
+{
+  copyStr(foundVin, sizeof(foundVin), vin);
+  hasFoundVin = true;
+  canReadWanted = false; // asked: the VAG diag task doesn't ask again (still busy until vehicleTick takes it)
 }
 
 bool vehicleCanReadBusy()

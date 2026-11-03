@@ -1,7 +1,159 @@
 #pragma once
 
 // can2gauge firmware version (semantic: major.minor.patch) - bump on every release, mirrored in data/version.json
-#define CAN2GAUGE_VERSION "0.38.2"  // 0.38.2 - No other company's scan tool named anywhere: Enable Other Scanners' help
+#define CAN2GAUGE_VERSION "0.39.7"  // 0.39.7 - Fixes: a Tiguan scanned (and First Boot's Your Car filled in) as a BMW -
+                                    //          My Car, saved apart from the settings, survived Factory Reset and won
+                                    //          over the VIN read. Factory Reset now forgets My Car and the last car
+                                    //          scan too; Scan My Car and the Your Car form go by the VIN read when it
+                                    //          isn't My Car's (the form says so). The paired OBD adapter is kept: also
+                                    //          saved under its own name (back after a settings layout change), an
+                                    //          empty one in a backup no longer unpairs it, and the web UI's Reboot
+                                    //          saves a change not yet written first. Not compiled.
+                                    // 0.39.6 - The K-line screen (menu > K-line, the K-line tab's live view): when the
+                                    //          engine doesn't answer at 0x01, OBD-II at 0x33 is tried (as First Boot
+                                    //          and Scan My Car do) and its PIDs show four to a page, a swipe for the
+                                    //          next ("Page 2 / 5"); the values feed the gauge too. Worked last time =
+                                    //          asked first next time. The Bluetooth OBD tab's K-line bench test ends
+                                    //          with OBD-II at 0x33 (ISO 9141-2, KWP2000 5-baud, fast init). Not compiled.
+                                    // 0.39.5 - Update All Gauges (was Update Other Gauges) works from any gauge: the gauge
+                                    //          with the newest firmware updates the others, the one pressed on too
+                                    //          (a new signed PLEASE request asks it; versions come from the heartbeats).
+                                    //          The screensaver comes up over any screen (a menu screen, Haldex,
+                                    //          Gearbox, Settings, the drag timer when it isn't timing) and goes back
+                                    //          there; leaving it is done by the LVGL task (the stack, as 0.39.4).
+                                    //          Output on the screen kept short: menu "Output", screen "OUTPUT",
+                                    //          Control Auto / On / Off, the trigger's name on the line above; other
+                                    //          menu screens' values shortened to fit the value column. Not compiled.
+                                    // 0.39.4 - Fix: the menu going back by itself after 10 s untouched, to a menu screen
+                                    //          (Navigation, CAN ...: the screen it was opened from), overflowed the
+                                    //          uiTick task's 6 KB stack and restarted the gauge (coredump 2026-11-03,
+                                    //          0.39.2: the slide draws that whole screen in the task asking for it).
+                                    //          The idle close is now done by the LVGL task (10 KB), as a tap's is.
+                                    //          Not compiled.
+                                    // 0.39.3 - Menu > Navigation: a swipe rolls over at the ends (past Route back to Off,
+                                    //          before Off to Route); it stopped there. Not compiled.
+                                    // 0.39.2 - Every Menu and Tabs switch is a menu item on the screen, each with its own
+                                    //          icon, in the switches' order: new Navigation, usb2ip, Oil and Triggers
+                                    //          screens. Navigation: the link's state (phone, route, next turn, last
+                                    //          update) and Off / Pop Up / Route buttons (a tap, or a swipe steps them;
+                                    //          the phone link starts / stops in the house task). A tap or a long press
+                                    //          on the nav card goes back to the gauges: Pop Up brings it back at the
+                                    //          next turn, Route not for the rest of the route (or until Route is
+                                    //          picked again). tabsShown is gone (the four tab switches are menuMask
+                                    //          bits now): SETTINGS_VERSION 32, the update resets every setting again
+                                    //          (Download Backup / Import Backup). Menu icons the glass never shows are
+                                    //          left out of the firmware (~105 KB of flash). Not compiled.
+                                    // 0.39.1 - Settings > Device > Menu and Tabs has a Navigation switch: it hides the
+                                    //          Navigation tab like the Oil / usb2ip / Triggers ones (tabsShown bit
+                                    //          TAB_SHOW_NAV, JSON menu "nav"; First Boot keeps it as it is). On a gauge
+                                    //          that ran 0.39.0 the switch starts off: switch it on. The USB bench
+                                    //          console sends the screen's two frame buffers (FILEGET /api/screen/glass
+                                    //          and /back; tools/diag/screen_grab.py makes PNGs) to look into the marks
+                                    //          left on the RPM dial after Show Test Turn and the accent colour at the
+                                    //          bottom of the nav card. Not compiled.
+                                    // 0.39.0 - Tidy, batch 1 (no change in what the gauge does): can2gauge_defs.h, main.cpp,
+                                    //          the tasks and the small files (OTA, RAM, WiFi, ME7 read / fast, drag
+                                    //          timer, CAN relay, triggers, WiFi OBD, IO, First Boot, shared settings,
+                                    //          themes, console, logger, units, boot sync) laid out the same way: the
+                                    //          file's settings and variables (grouped by type), a list of its functions,
+                                    //          setupX() / the task first, the details below; short comments without
+                                    //          version tags. The Settings fields go by type within each section:
+                                    //          SETTINGS_VERSION 31, so the update puts every setting back to its default
+                                    //          (Download Backup before, Import Backup after: the backup goes by name).
+                                    //          unitsSanitize -> unitsSanitise. Not compiled.
+                                    // 0.38.8 - Fix: a page rebuild (a settings save, shared settings from another gauge, an
+                                    //          adc2can range) while LVGL was sliding to another page itself crashed the
+                                    //          gauge: LVGL still held the deleted page as the screen it was going to, and
+                                    //          the next screen load moved it (LoadProhibited in lv_screen_load_anim).
+                                    //          Found on the bench with tools/diag/anim_rebuild_test.py over USB: a crash
+                                    //          every round on 0.38.7. lvglFinishScreenAnimation() ends such a slide at
+                                    //          once before the pages, the menu or the theme are rebuilt. Not compiled.
+                                    // 0.38.7 - First Boot: with other gauges heard on the chain, "Set Up the Other Gauges
+                                    //          the Same" (ticked) at Finish. After this gauge's own setup (and the car's
+                                    //          DBC), POST /api/chain/setup saves what the others get (/fbsetup.json:
+                                    //          pages, triggers, CAN profile, OBD, OpenHaldex, usb2ip, menu, the diag
+                                    //          slots, the oil over CAN) and the chain update task sends it, the car scan
+                                    //          and the DBC slots to each gauge over ESP-NOW: a setup job (UPD_SETUP
+                                    //          hello, signed files, FINISH applies them as a web UI save would - no
+                                    //          firmware, no restart; only between gauges on the same version). Each
+                                    //          gauge starts on its own page by its place in the row (chainSetupStartPage)
+                                    //          and its First Boot question goes. Kept per gauge: WiFi, row number, name,
+                                    //          CAN termination, the OBD dongle, the K-line, the dash-light wire (theme,
+                                    //          units, screensaver, ignition and boot logo travel as shared settings
+                                    //          already). The settings save (web UI, USB console, a setup) is one at a
+                                    //          time now (settingsApplyMutex). Untested, not compiled.
+                                    // 0.38.6 - First Boot (web UI): no VW engine at 01 on the K-line, and it asks OBD-II at
+                                    //          33 too (any make: one wake-up and the PID lists, as Scan My Car does) -
+                                    //          its own row in the checks. Before, it only waited for 01, so an older car
+                                    //          with K-line OBD-II only found nothing, and the car scan didn't run either
+                                    //          (no way in). 33 answering counts as a way in (the scan runs), suggests
+                                    //          K-line KWP2000 OBD-II at address 33, and the OBD gauges. Untested.
+                                    // 0.38.5 - Update Other Gauges: a web file that arrives with the wrong fingerprint is
+                                    //          sent again (3 tries in all) instead of failing the whole gauge - before,
+                                    //          the gauge being updated threw away the firmware it had already checked
+                                    //          and kept the files already in place (new web UI, old firmware) until the
+                                    //          update was run again. The sender's own flash reads are checked now (a
+                                    //          short read is tried once more, then the job stops with "couldn't read
+                                    //          our own files / firmware"), where before a short read went out as it was.
+                                    //          Untested, not compiled.
+                                    // 0.38.4 - K-line KWP2000 / OBD-II: no answer or no VIN at the address set (01 by
+                                    //          default) and it tries the OBD-II address 33 by itself, keeping whichever
+                                    //          works (nothing to type in). Fuel in litres is its own value, "Fuel tank"
+                                    //          (fuelLitres, L): the VAG cluster's tank litres (PQ mKombi_1, MQB / MLB
+                                    //          Kombi_02) went into OBD's Fuel %. Scan My Car (web UI): VW's own 29-bit
+                                    //          addresses asked too (the 2025 Tiguan answers 18DAF101 / 18DAF102, not
+                                    //          at 10 / 18), for OBD and for the engine / gearbox diagnostics lists;
+                                    //          modules named "(OBD)" or "(diagnostics)"; the log ends with what came
+                                    //          from where; Add to Gauge on every value; Suggested Gauges and Triggers
+                                    //          under the scan, the same lists First Boot makes. First Boot's starter
+                                    //          set: every source offered (the engine: rpm, speed, oil temp / pressure,
+                                    //          coolant, boost, battery ...; the gearbox: gear, its and the clutch's
+                                    //          temperature; adc2can with its dial range and warning; usb2ip; OpenHaldex;
+                                    //          one value from each other module), the 8 ticks one per source first;
+                                    //          suggested triggers (coolant, rpm, boost, battery low / high, oil,
+                                    //          gearbox, EGT, the adc2can sensors' own warning limits). A scanned value's
+                                    //          gauge range from its own unit. Fix: car.js and carscan.js both had
+                                    //          carAddStyle / carSetup, so Scan My Car's styles were never added (its
+                                    //          progress bar never showed). tools/diag/anim_rebuild_test.py drives the
+                                    //          page-rebuild-during-an-animation test. Untested, not compiled.
+                                    // 0.38.3 - Bug review of the whole firmware (nine reviews by area), the clear bugs fixed.
+                                    //          Crashes: a Service job over CAN / the adapter ran out of the VAG diag
+                                    //          task's stack (3 KB on a 4 KB stack); a diag value's Bit near 65535
+                                    //          wrapped past the length check; a K-line OBD answer longer than 8 bytes;
+                                    //          the ME7 logger's 64-byte answers read with a 250-byte limit; Recent
+                                    //          Frames with a 0-byte or 9-15 length frame; Rev Runner on a pack that
+                                    //          failed to open; a sprite mood band narrower than 1 (divide by zero).
+                                    //          Car / power: CAN RX left on the wake circuit after a deep-sleep wake on
+                                    //          CAN (rtc_gpio_deinit); the output switched on during each night-time
+                                    //          wake check; a trigger's output stayed on after the trigger was switched
+                                    //          off; triggers ran in standby (No Reading fired as the bus slept);
+                                    //          standby set first so the backlight can't come back during the fade.
+                                    //          Values: MQB / MLB init / error / not-fitted codes no longer shown as
+                                    //          readings (76.5 C outside temp, 142 C coolant at ignition-on); MaxxECU
+                                    //          1.2 oil from base + 0x16 only once a 1.3 frame is heard; OBD polling
+                                    //          moves on when a later PID list is refused; a chain follower learns the
+                                    //          pedal PID for Throttle; OpenHaldex / usb2ip car signals and the chain's
+                                    //          "alive" checks no longer trip on a 1 ms time stamp slip; every shared
+                                    //          signal goes out over ESP-NOW (was the first 40); Match Car only follows
+                                    //          My Car's own VIN. Scan / diag: Scan My Car and the CAN VIN read get their
+                                    //          turn while diag values poll; the VIN read obeys Enable Other Scanners and
+                                    //          hands the VIN to the house task; a TP2.0 module no longer reads another's
+                                    //          channel; no stale part number on a module that won't identify; UDS
+                                    //          answers over 256 bytes cut short, not lost. K-line: a lost KWP2000 VAG
+                                    //          session reconnects (and a refused block is empty, not a lost session);
+                                    //          menu > K-line with address 0 no longer spins the K-line task; KWP2000
+                                    //          VAG keeps the module's identification; label lookup locked (K-line task
+                                    //          and web server). Adapter: a failed diag setup puts the header back on
+                                    //          the engine; PID lists 21-60 from the engine only; DHCP back after the
+                                    //          WiFi adapter's fixed-IP try; nav link off lets the phone go; Bluetooth
+                                    //          waits for a disconnect before reconnecting. Web: /api/ecu/library was
+                                    //          shadowed by /api/ecu; uploads go through a .part file and report a full
+                                    //          filesystem; Factory Reset takes the chain's shared settings; screen:
+                                    //          the Oil (PQ) page's LEVEL line is back; a swipe / long press no longer
+                                    //          also taps (or clears an alert); no blank screen after standby + a
+                                    //          rebuild; partial-mode strips sized for RGB565 (77 KB, was 115 KB).
+                                    //          Untested, not compiled.
+                                    // 0.38.2 - No other company's scan tool named anywhere: Enable Other Scanners' help
                                     //          text says "another scan tool or code reader", and the code / tools / sim
                                     //          comments say "the capture" or "scan tools" instead. Wording only.
                                     // 0.38.1 - Fix: picking Settings on the screen's menu (seen with Gauge Control's Single

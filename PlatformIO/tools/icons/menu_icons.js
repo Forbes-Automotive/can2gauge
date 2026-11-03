@@ -153,6 +153,41 @@
       }
       ctx.strokeStyle = acc2(); ctx.lineWidth = 2; ctx.strokeRect(47, -46, 40, 30); // the cloth's edge
     },
+    nav() { // the nav card: its turn arrow, and the journey ring's part done (second accent) from its start dot. No grey
+      // track for the rest of the ring: every layer is a bitmap the size of its ink, and the track alone was ~24 KB of flash
+      ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(0, 4, 68, A0, A0 + SPAN * .4); ctx.strokeStyle = acc2(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(Math.cos(A0) * 68, 4 + Math.sin(A0) * 68, 8, 0, TAU); ctx.fillStyle = acc2(); ctx.fill(); // the start dot
+      ctx.strokeStyle = acc(); ctx.lineWidth = 12; ctx.lineCap = "butt"; // the turn: up the road, then right
+      ctx.beginPath(); ctx.moveTo(-14, 48); ctx.lineTo(-14, -2); ctx.arcTo(-14, -18, 2, -18, 16); ctx.lineTo(14, -18); ctx.stroke();
+      ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(12, -40); ctx.lineTo(42, -18); ctx.lineTo(12, 4); ctx.closePath(); ctx.fillStyle = acc(); ctx.fill(); // the arrowhead
+    },
+    ecu() { // usb2ip: the ECU, its USB plug, and the values going out over WiFi
+      ctx.strokeStyle = COL.muted; ctx.lineWidth = 4; rr(-88, -32, 64, 64, 8); ctx.stroke(); // the ECU
+      ctx.lineWidth = 3; for (const y of [-14, 0, 14]) ln(-76, y, -36, y); // its circuit, as lines (like the K-line's module)
+      ctx.strokeStyle = acc(); ctx.lineWidth = 5; ln(-24, 0, -6, 0); // the cable
+      rr(-6, -15, 32, 30, 4); ctx.stroke(); // the USB plug
+      ctx.fillStyle = acc(); ctx.fillRect(2, -7, 6, 5); ctx.fillRect(12, -7, 6, 5); // its contacts
+      ctx.strokeStyle = acc2(); ctx.lineWidth = 5;
+      for (const r of [16, 30, 44]) { ctx.beginPath(); ctx.arc(36, 0, r, -Math.PI / 4, Math.PI / 4); ctx.stroke(); } // WiFi
+    },
+    oil() { // the cluster's oil can, a drop falling from its spout
+      ctx.strokeStyle = COL.line; ctx.lineWidth = 3; ln(-80, 44, 84, 44); // what it stands on
+      ctx.strokeStyle = acc(); ctx.lineWidth = 5;
+      rr(-40, -6, 66, 40, 6); ctx.stroke(); // the can
+      ln(-14, -6, -14, -20); ln(-26, -20, -2, -20); // its filler cap
+      ctx.beginPath(); ctx.moveTo(-40, 4); ctx.lineTo(-66, -10); ctx.lineTo(-66, 18); ctx.lineTo(-40, 26); ctx.stroke(); // the handle
+      ctx.beginPath(); ctx.moveTo(26, 2); ctx.lineTo(62, -24); ctx.lineTo(68, -16); ctx.lineTo(26, 18); ctx.stroke(); // the spout
+      ctx.fillStyle = acc2(); ctx.beginPath(); ctx.moveTo(70, -4); ctx.lineTo(62, 12); ctx.lineTo(78, 12); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(70, 15, 8, 0, TAU); ctx.fill(); // the drop
+    },
+    triggers() { // a reading rising through its limit (dashed), the point it fired lit (no axes: they cost flash, see nav)
+      ctx.setLineDash([8, 8]); ctx.strokeStyle = acc2(); ctx.lineWidth = 4; ln(-66, -14, 66, -14); ctx.setLineDash([]); // the limit
+      ctx.strokeStyle = acc(); ctx.lineWidth = 6; ctx.beginPath();
+      [[-62, 34], [-42, 22], [-24, 32], [-4, 6], [12, 14], [30, -36], [46, -24], [64, -46]].forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(22, -14, 9, 0, TAU); ctx.fillStyle = acc2(); ctx.fill(); // where it crossed the limit
+    },
   };
 
   function draw(c, name, cx, cy, s, k) {

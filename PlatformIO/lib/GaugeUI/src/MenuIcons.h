@@ -5,26 +5,21 @@
 
 enum menuIcon_t : uint8_t
 {
-  MI_OBD,
   MI_CAN,
-  MI_CCAN,
   MI_HALDEX,
   MI_KLINE,
   MI_ADC,
   MI_SETTINGS,
-  MI_SUN,
-  MI_SWEEP,
-  MI_MOON,
-  MI_OHM,
-  MI_WIFI,
-  MI_INFO,
-  MI_BACK,
   MI_OUTPUT,
   MI_DSG,
   MI_BLE,
   MI_CHAIN,
   MI_GAUGES,
   MI_DRAG,
+  MI_NAV,
+  MI_ECU,
+  MI_OIL,
+  MI_TRIGGERS,
   MI_COUNT
 };
 

@@ -218,11 +218,20 @@ void setupPower()
 // woken from deep sleep: the glass is still dark (setup() has not reached the display). Ignition on -> carry on booting;
 // still off -> back to sleep. CAN: a sleeping car's bus wakes for other reasons too (unlocking, the comfort bus), so
 // keep listening (listen-only, nothing sent) while it is busy and sleep once it has been quiet for POWER_BUS_QUIET_MS.
+// the wake check is over and the gauge stays awake: CAN may send again, and the output follows its settings again
+// (main.cpp held it off in standby while the check ran)
+static void wakeProbeDone()
+{
+  runtime.standby = false;
+  canSetListenOnly(false);
+  outputsApply();
+}
+
 void powerWakeProbe(bool fromSleep)
 {
   if (!fromSleep || settings.ignSource == IGN_SRC_OFF)
   {
-    canSetListenOnly(false);
+    wakeProbeDone();
     return;
   }
   if (settings.ignSource == IGN_SRC_WIRE)
@@ -233,7 +242,7 @@ void powerWakeProbe(bool fromSleep)
       {
         DEBUG("power: woken with the ignition on");
         runtime.wokeFromSleep = true;
-        canSetListenOnly(false); // main.cpp started the bus listen-only for the check
+        wakeProbeDone(); // main.cpp started the bus listen-only for the check
         return;
       }
       delay(100);
@@ -264,7 +273,7 @@ void powerWakeProbe(bool fromSleep)
     {
       DEBUG("power: woken with the ignition on");
       runtime.wokeFromSleep = true;
-      canSetListenOnly(false);
+      wakeProbeDone();
       if (!settings.canEnabled)
       {
         canEnd(); // the probe borrowed the bus
@@ -298,10 +307,10 @@ static void rampBacklight(uint8_t target, uint32_t durationMs)
 
 static void enterStandby()
 {
+  runtime.standby = true; // first: nothing else turns the backlight up again while it fades out
   rampBacklight(0, 1500); // docs/mascot/MASCOT.md: the sleep clip keeps looping while the glass fades out
   uiStandby(true);
   displaySleep(true);
-  runtime.standby = true;
   canSetListenOnly(true); // watch for terminal 15 without keeping the car's bus awake
   ioxSet(IOX_OUT, false); // outputRequest keeps it off while in standby
   klineRestart();         // close any K-line session (the task idles in standby)

@@ -323,8 +323,9 @@ static bool gaveUp(char *detail, size_t detailLen)
 
 static bool running(uint32_t myGeneration)
 {
+  // a waiting Service tab job, Scan My Car job or VIN read closes the session and takes over
   return generation == myGeneration && linkUp() && linkIsMaster() && !runtime.standby && !runtime.otherScanners && wanted() &&
-         !serviceCanPending(); // 0.16.0: a Service tab job closes the session and takes over
+         !serviceCanPending() && !carScanCanPending() && !vehicleCanReadWanted();
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +529,7 @@ static bool udsRequestCanOnTurn(const DiagTarget &target, const uint8_t *request
   uint32_t deadline = millis() + VDIAG_ANSWER_MS;
   bool longAnswer = false;   // a first frame came: collecting consecutive frames
   uint16_t total = 0;        // the long answer's length
+  uint16_t received = 0;     // how much of it has come so far (answerLen stops at the buffer's size)
   uint8_t nextSequence = 1;  // the consecutive frame expected next
   uint8_t data[8];           // one frame's ISO-TP bytes
   uint8_t dataLen = 0;
@@ -563,6 +565,7 @@ static bool udsRequestCanOnTurn(const DiagTarget &target, const uint8_t *request
       }
       answerLen = dataLen - 2;
       memcpy(answer, &data[2], answerLen);
+      received = answerLen;
       longAnswer = true;
       nextSequence = 1;
       // the flow control: carry on, no block limit, and the gap the module leaves between its frames
@@ -589,18 +592,21 @@ static bool udsRequestCanOnTurn(const DiagTarget &target, const uint8_t *request
         return false;      // a frame went missing
       }
       nextSequence++;
-      uint16_t chunk = total - answerLen;
+      uint16_t chunk = total - received;
       if (chunk > dataLen - 1)
       {
         chunk = dataLen - 1;
       }
-      if (answerLen + chunk > VDIAG_BUFFER)
+      // keep what fits: a longer answer (a long fault list) is cut short rather than thrown away
+      uint16_t kept = chunk;
+      if (answerLen + kept > VDIAG_BUFFER)
       {
-        return false; // longer than we keep
+        kept = VDIAG_BUFFER - answerLen;
       }
-      memcpy(answer + answerLen, &data[1], chunk);
-      answerLen += chunk;
-      if (answerLen >= total)
+      memcpy(answer + answerLen, &data[1], kept);
+      answerLen += kept;
+      received += chunk;
+      if (received >= total)
       {
         return true;
       }
@@ -689,13 +695,15 @@ static bool udsValue(const VdiagValue &config, const uint8_t *data, uint16_t dat
   {
     bitLen = 8;
   }
-  const uint16_t firstByte = config.bitPos / 8;         // the byte the value starts in
-  const uint16_t lastBit = config.bitPos + bitLen - 1;  // the value's last bit
-  const uint16_t byteCount = lastBit / 8 - firstByte + 1; // the bytes it touches (1..5)
+  // worked out in 32 bits: a bit position near 65535 must not wrap round past the length check below
+  const uint32_t firstBit = config.bitPos;        // the value's first bit
+  const uint32_t lastBit = firstBit + bitLen - 1; // the value's last bit
   if (lastBit / 8 >= dataLen)
   {
     return false; // the DID is shorter than the setting says
   }
+  const uint16_t firstByte = firstBit / 8;                // the byte the value starts in
+  const uint16_t byteCount = lastBit / 8 - firstByte + 1; // the bytes it touches (1..5)
   // the bytes the value is in, turned round for an LSB-first value of more than a byte
   uint8_t bytes[5];
   for (uint16_t i = 0; i < byteCount; i++)
@@ -711,7 +719,7 @@ static bool udsValue(const VdiagValue &config, const uint8_t *data, uint16_t dat
   }
   // the bits one by one, most significant first
   uint32_t raw = 0;
-  for (uint16_t bit = config.bitPos; bit <= lastBit; bit++)
+  for (uint32_t bit = firstBit; bit <= lastBit; bit++)
   {
     const uint16_t byteIndex = bit / 8 - firstByte;
     const uint8_t bitInByte = 7 - (bit % 8); // bit 0 of a byte is its top bit (0x80)
@@ -1091,6 +1099,11 @@ static bool tp20Open(uint8_t module)
 // 1A 9B -> 5A 9B "02E300050H  1401" ... "GSG DSG   081": the part number, then the longest text in the rest
 static void tp20Identify()
 {
+  // forget the last module's identification first, so a module that won't say carries no one else's
+  portENTER_CRITICAL(&statusMux);
+  status.partNumber[0] = '\0';
+  status.component[0] = '\0';
+  portEXIT_CRITICAL(&statusMux);
   const uint8_t identRequest[2] = {0x1A, 0x9B}; // ReadEcuIdentification 0x9B
   uint16_t answerLen = 0;
   if (!tp20.transact(identRequest, 2, answer, VDIAG_BUFFER, answerLen, 1000) || answerLen < 14 || answer[0] != 0x5A)
@@ -1348,6 +1361,14 @@ static bool openModule(PollModule &module)
   if (tp20.isOpen())
   {
     tp20.close(); // one TP2.0 channel at a time
+    // whichever module had it is closed now too, so it opens its own channel again on its next visit
+    for (uint8_t m = 0; m < moduleCount; m++)
+    {
+      if (&modules[m] != &module && modules[m].isKwp && !modules[m].viaDsg)
+      {
+        modules[m].open = false;
+      }
+    }
   }
   if (tp20Open(module.tp20Module))
   {
@@ -1657,6 +1678,7 @@ static void visitModule(uint8_t m)
     }
     module.identified = true;
   }
+  bool probeAsked = false; // a "Try a DID" went to this module's UDS session just now
   if (module.isTab && probeWaiting) // the tab's "Try a DID"
   {
     if (module.isKwp)
@@ -1668,6 +1690,7 @@ static void visitModule(uint8_t m)
     else
     {
       udsProbe(module.target, probeRequest);
+      probeAsked = true;
     }
     probeWaiting = false;
   }
@@ -1689,7 +1712,10 @@ static void visitModule(uint8_t m)
   else
   {
     udsValues(module, toRead, toReadCount);
-    module.lastAskedMs = millis();
+    if (toReadCount > 0 || probeAsked)
+    {
+      module.lastAskedMs = millis(); // only when something was asked: a module asked nothing has its session reopened
+    }
     if (module.lostAnswers >= VDIAG_FAILS_MAX)
     {
       module.open = false; // no answers: the session is opened again next time
@@ -1764,15 +1790,17 @@ static bool runModules(uint32_t myGeneration)
   bool anyAnswered = false;
   bool firstRound = true;
   uint8_t kwpModules = 0; // TP2.0 modules: with more than one, each channel is closed after its visit
-  for (uint8_t m = 0; m < moduleCount; m++)
-  {
-    if (modules[m].isKwp && !modules[m].viaDsg) // 0.37.10: not the ones on the DSG's channel
-    {
-      kwpModules++;
-    }
-  }
   while (running(myGeneration) && wantedValues() == mask)
   {
+    // counted each round: the tab's module on Protocol Auto can turn out to be TP2.0 part-way through
+    kwpModules = 0;
+    for (uint8_t m = 0; m < moduleCount; m++)
+    {
+      if (modules[m].isKwp && !modules[m].viaDsg) // not the ones on the DSG's channel
+      {
+        kwpModules++;
+      }
+    }
     uint8_t givenUp = 0;
     for (uint8_t m = 0; m < moduleCount && running(myGeneration); m++)
     {
@@ -2291,7 +2319,7 @@ static void runScan()
 // runs the waiting CAN / adapter job (in this task, with the VAG diag session closed)
 static void runServiceJob()
 {
-  ServiceStatus job;
+  EXT_RAM_BSS_ATTR static ServiceStatus job; // static, in PSRAM: ~3 KB is too big for this task's 4 KB stack
   serviceStatusCopy(job);
   bool ok = false;
   useAdapter = job.via == SVC_VIA_ADAPTER; // 0.34.0
@@ -2347,7 +2375,9 @@ static void runVinRead()
 {
   useAdapter = false;
   bool found = false;
-  if (canStats().up)
+  char vin[18];
+  // nothing is sent with Enable Other Scanners on or the ignition off
+  if (canStats().up && !runtime.otherScanners && !runtime.standby)
   {
     const uint32_t requestIds[3] = {0x7E0, 0x18DA01F1UL, 0x18DA10F1UL};
     for (uint8_t idIndex = 0; idIndex < 3 && !found; idIndex++)
@@ -2356,7 +2386,6 @@ static void runVinRead()
       const uint8_t vinDid[3] = {0x22, 0xF1, 0x90}; // ReadDataByIdentifier F190: the VIN
       const uint8_t vinPid[2] = {0x09, 0x02};       // OBD mode 09 PID 02: the VIN
       uint16_t answerLen = 0;
-      char vin[18];
       if (udsRequest(target, vinDid, 3, answerLen) && answerLen >= 20 && answer[0] == 0x62)
       {
         memcpy(vin, &answer[3], 17); // 62 F1 90 then the 17 characters
@@ -2369,14 +2398,17 @@ static void runVinRead()
         vin[17] = '\0';
         found = vehicleVinValid(vin);
       }
-      if (found)
-      {
-        vehicleTakeVin(vin, VIN_SRC_CAN_OBD, false);
-      }
     }
   }
   listenId = 0;
-  vehicleCanReadDone(found);
+  if (found)
+  {
+    vehicleCanReadFound(vin); // the house task takes it: saving My Car / a new theme is too much for this stack
+  }
+  else
+  {
+    vehicleCanReadDone(false);
+  }
 }
 
 static void vdiagTaskFn(void *parameter)

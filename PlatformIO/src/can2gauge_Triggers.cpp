@@ -1,55 +1,44 @@
-#include <can2gauge_Triggers.h>
-#include <can2gauge_IO.h>
-#include <GaugeUI.h>
+// Set-point triggers: each one watches a signal against a threshold (above or below, with a hysteresis band and a
+// hold time) and, once it fires, puts an alert on the screen and / or switches an output on.
 
-// 0.32.0: how long after power-on a missing reading is ignored even by a "No Reading: Trigger" trigger - the CAN bus,
+#include <can2gauge_Triggers.h>
+#include <can2gauge_IO.h> // outputRequest: the trigger outputs
+#include <GaugeUI.h>      // uiAlert / uiClearAlert: the alert on the screen
+
+// ===== Settings for this file =====
+// how long after power-on a missing reading is ignored even by a "No Reading: Trigger" trigger - the CAN bus,
 // the adc2can and the page sources take a moment to send their first values
 #define NO_READING_GRACE_MS 5000
 
+// where one trigger is up to (this file's own, never saved)
 struct TriggerState
 {
-  bool active;       // the trigger has fired (its alert / output are on)
-  bool acknowledged; // 0.32.0: the driver tapped its alert away: no alert again until the condition has cleared
   uint32_t sinceMs;  // when the condition first became true (0 = it isn't)
+  bool active;       // the trigger has fired (its alert / output are on)
+  bool acknowledged; // the driver tapped its alert away: no alert again until the condition has cleared
 };
-static TriggerState triggerStates[MAX_TRIGGERS];
 
-static uint32_t acksSeen = 0;          // 0.32.0: runtime.alertAcks as last read (a change = the driver tapped an alert)
-static bool alertShown = false;        // 0.32.0: the triggers' alert is on the screen
-static char alertShownText[NAME_LEN];  // ... with this text
+// ===== File variables (static: private to this file) =====
+static uint32_t acksSeen = 0;                    // runtime.alertAcks as last read (a change = the driver tapped an alert)
+static uint32_t awakeSinceMs = 0;                // when the gauge came out of standby (or started): the readings take a moment
+static bool isAlertShown = false;                // the triggers' alert is on the screen
+static char alertShownText[NAME_LEN];            // ... with this text
+static TriggerState triggerStates[MAX_TRIGGERS]; // where each trigger is up to
 
+// ===== Functions in this file =====
+static void acknowledgeTriggers(); // every fired trigger counts as acknowledged (its alert stays away)
+
+// every trigger starts not fired
 void setupTriggers()
 {
+  DEBUG("Setting up the triggers...");
   memset(triggerStates, 0, sizeof(triggerStates));
   acksSeen = runtime.alertAcks;
+  DEBUG("Set up the triggers!");
 }
 
-bool triggerActive(uint8_t index)
-{
-  return index < MAX_TRIGGERS && triggerStates[index].active;
-}
-
-// 0.32.0: every trigger that has fired counts as acknowledged: its alert stays away until its condition clears (then
-// it re-arms). A latched one lets go then too. Before, the alert came straight back on the next pass.
-static void acknowledgeTriggers()
-{
-  for (int triggerIndex = 0; triggerIndex < MAX_TRIGGERS; triggerIndex++)
-  {
-    if (triggerStates[triggerIndex].active)
-    {
-      triggerStates[triggerIndex].acknowledged = true;
-    }
-  }
-}
-
-// the web UI's Clear Alerts: the same as tapping the alert away
-void triggersReset()
-{
-  acknowledgeTriggers();
-  uiClearAlert();
-  alertShown = false;
-}
-
+// checks every trigger (logic task, every triggerRefresh ms): fires / lets go of each one, switches the outputs and
+// puts up / takes down the alert on the screen
 void triggersTick()
 {
   const uint32_t now = millis();
@@ -57,14 +46,29 @@ void triggersTick()
   const char *alertText = NULL;
   bool alertLatch = false;
   bool outputWanted[IOX_CHANNELS] = {0};
-  bool outputUsed[IOX_CHANNELS] = {0};
 
-  // 0.32.0: the driver tapped the alert away since the last pass
+  // ignition off (standby): nothing is checked, as the car's readings stop when its bus sleeps. Coming back, the
+  // readings get the same moment to arrive as at power-up before "No Reading" counts.
+  if (runtime.standby)
+  {
+    for (int triggerIndex = 0; triggerIndex < MAX_TRIGGERS; triggerIndex++)
+    {
+      triggerStates[triggerIndex].sinceMs = 0;
+    }
+    awakeSinceMs = 0;
+    return;
+  }
+  if (awakeSinceMs == 0)
+  {
+    awakeSinceMs = now | 1; // never 0 (0 = not started)
+  }
+
+  // the driver tapped the alert away since the last pass
   if (runtime.alertAcks != acksSeen)
   {
     acksSeen = runtime.alertAcks;
     acknowledgeTriggers();
-    alertShown = false;
+    isAlertShown = false;
   }
 
   for (int triggerIndex = 0; triggerIndex < MAX_TRIGGERS; triggerIndex++)
@@ -74,7 +78,7 @@ void triggersTick()
     const signalId_t id = (signalId_t)trigger.signal;
     if (!trigger.enabled || id == SIG_NONE)
     {
-      // 0.32.0: switched off = off, latched or not (before, a latched one stayed on with its output)
+      // switched off = off, latched or not
       state.active = false;
       state.acknowledged = false;
       state.sinceMs = 0;
@@ -98,14 +102,14 @@ void triggersTick()
         release = value > trigger.threshold + trigger.hysteresis;
       }
     }
-    else if (settings.triggers[triggerIndex].noReading && now > NO_READING_GRACE_MS)
+    else if (settings.triggers[triggerIndex].noReading && (int32_t)(now - awakeSinceMs) > NO_READING_GRACE_MS)
     {
-      // 0.32.0: no reading (sensor unplugged, shorted or faulted, the bus quiet) and the trigger is set to count that.
+      // no reading (sensor unplugged, shorted or faulted, the bus quiet) and the trigger is set to count that.
       // A shorted adc2can sensor reads as "no value", so a "below 3.5 V" alarm never saw the 0 V it was waiting for.
       condition = true;
       release = false;
     }
-    // (no reading and set to ignore it: condition false, release true - the trigger waits, as before)
+    // (no reading and set to ignore it: condition false, release true - the trigger waits)
 
     if (condition)
     {
@@ -143,43 +147,64 @@ void triggersTick()
       alertText = trigger.label;
       alertLatch = trigger.latch;
     }
-    if (usesOutput)
+    if (usesOutput && state.active)
     {
-      outputUsed[trigger.output] = true;
-      if (state.active)
-      {
-        outputWanted[trigger.output] = true; // the output stays on while the trigger is active, acknowledged or not
-      }
+      outputWanted[trigger.output] = true; // the output stays on while the trigger is active, acknowledged or not
     }
   }
 
+  // every channel, used by a trigger or not: one whose trigger was just switched off (or changed to alert only) goes off
   for (int channel = 0; channel < IOX_CHANNELS; channel++)
   {
-    if (outputUsed[channel])
-    {
-      outputRequest(channel, outputWanted[channel], true);
-    }
+    outputRequest(channel, outputWanted[channel], true);
   }
 
   // the alert on the screen
-  if (alertShown && !runtime.alertActive)
+  if (isAlertShown && !runtime.alertActive)
   {
-    alertShown = false; // taken off by something else (a test alert cleared ...): put it back below if still wanted
+    isAlertShown = false; // taken off by something else (a test alert cleared ...): put it back below if still wanted
   }
   if (anyAlert)
   {
-    if (!alertShown || strcmp(alertShownText, alertText) != 0)
+    if (!isAlertShown || strcmp(alertShownText, alertText) != 0)
     {
-      if (uiAlert(alertText, alertLatch)) // 0.32.0: false = the screen was busy: tried again on the next pass
+      if (uiAlert(alertText, alertLatch)) // false = the screen was busy: tried again on the next pass
       {
-        alertShown = true;
+        isAlertShown = true;
         copyStr(alertShownText, sizeof(alertShownText), alertText);
       }
     }
   }
-  else if (alertShown)
+  else if (isAlertShown)
   {
     uiClearAlert();
-    alertShown = false;
+    isAlertShown = false;
+  }
+}
+
+// has this trigger fired? (the web UI, the screen's trigger marks)
+bool triggerActive(uint8_t index)
+{
+  return index < MAX_TRIGGERS && triggerStates[index].active;
+}
+
+// the web UI's Clear Alerts: the same as tapping the alert away
+void triggersReset()
+{
+  acknowledgeTriggers();
+  uiClearAlert();
+  isAlertShown = false;
+}
+
+// Every trigger that has fired counts as acknowledged: its alert stays away until its condition clears (then it
+// re-arms), so the alert doesn't come straight back on the next pass. A latched one lets go then too.
+static void acknowledgeTriggers()
+{
+  for (int triggerIndex = 0; triggerIndex < MAX_TRIGGERS; triggerIndex++)
+  {
+    if (triggerStates[triggerIndex].active)
+    {
+      triggerStates[triggerIndex].acknowledged = true;
+    }
   }
 }

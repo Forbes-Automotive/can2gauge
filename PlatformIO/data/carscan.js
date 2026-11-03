@@ -326,15 +326,16 @@ async function carKlineEngine(status, step) {
 // 0.37.6: the OBD ECUs to ask (each answers on its own id): 11-bit 7E0-7E7, and 29-bit 18 DA xx F1 for the usual
 // engine / gearbox / other addresses
 const CAR_OBD_11 = [0x7E0, 0x7E1, 0x7E2, 0x7E3, 0x7E4, 0x7E5, 0x7E6, 0x7E7];
-const CAR_OBD_29 = [0x10, 0x11, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x28];
+// 0.38.4: 01 / 02 first - the VW group's own engine / gearbox addresses (the 2025 Tiguan answers 18DAF101 / 18DAF102)
+const CAR_OBD_29 = [0x01, 0x02, 0x10, 0x11, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x28];
 // 0.37.6: BMW's usual module addresses (extended addressing on 6F1) and what they are
 const CAR_BMW_NAMES = { 0x12: "Engine (DME)", 0x13: "Engine 2 (DME)", 0x18: "Gearbox (EGS)", 0x29: "Brakes (DSC)",
   0x30: "Steering (EPS)", 0x40: "Body (BDC / FEM)", 0x60: "Instruments (KOMBI)", 0x63: "Head unit", 0x78: "Climate (IHKA)" };
 
 // an OBD ECU's name: the engine and gearbox by their usual ids, the rest by id
 function carObdEcuName(tx) {
-  if (tx === 0x7E0 || tx === 0x18DA10F1) return "Engine";
-  if (tx === 0x7E1 || tx === 0x18DA18F1) return "Gearbox";
+  if (tx === 0x7E0 || tx === 0x18DA10F1 || tx === 0x18DA01F1) return "Engine";
+  if (tx === 0x7E1 || tx === 0x18DA18F1 || tx === 0x18DA02F1) return "Gearbox";
   return "OBD ECU " + carIdText(tx);
 }
 
@@ -396,6 +397,15 @@ async function carMakeOf(link, found) {
   found.vin = (vehicle.car && vehicle.car.vin) || (vehicle.detected && vehicle.detected.vin) || "";
   found.make = (vehicle.car && vehicle.car.confirmed && vehicle.car.make) || (vehicle.detected && vehicle.detected.make) || "";
   found.makeKey = (vehicle.car && vehicle.car.confirmed && vehicle.car.makeKey) || (vehicle.detected && vehicle.detected.makeKey) || "";
+  // 0.39.7: the car the gauge is talking to wins over My Car when their VINs differ (another car, or My Car left over
+  // from before): a Tiguan was scanned as the BMW saved on the bench
+  const seen = vehicle.detected || {};
+  const saved = vehicle.car || {};
+  if (seen.vin && seen.make && seen.vin !== saved.vin) {
+    found.vin = seen.vin;
+    found.make = seen.make;
+    found.makeKey = seen.makeKey || "";
+  }
 }
 
 // 0.38.0: OBD-II on the gauge's K-line, any make: one wake-up of the OBD address 0x33 and the PID lists (the gauge's
@@ -452,8 +462,9 @@ async function carScan(step, progress) {
   let link = "";
   let car29 = false; // the car answers OBD on 29-bit ids
   if (status.can && status.can.up) {
-    const answers = await carAsk("can", [{ tx: 0x7E0, req: "0100" }, { tx: 0x18DA10F1, req: "0100" }]);
-    if (answers[0].s === 1 || answers[1].s === 1) {
+    // 0.38.4: + 18 DA 01 F1, VW's own engine address on 29-bit cars (the 2025 Tiguan answers there, not at 10)
+    const answers = await carAsk("can", [{ tx: 0x7E0, req: "0100" }, { tx: 0x18DA10F1, req: "0100" }, { tx: 0x18DA01F1, req: "0100" }]);
+    if (answers[0].s === 1 || answers[1].s === 1 || answers[2].s === 1) {
       link = "can";
       car29 = answers[0].s !== 1;
       let idsText = "";
@@ -550,7 +561,7 @@ async function carScan(step, progress) {
           }
         }
       });
-      const isEngine = e === 0 && (tx === 0x7E0 || tx === 0x18DA10F1);
+      const isEngine = e === 0 && (tx === 0x7E0 || tx === 0x18DA10F1 || tx === 0x18DA01F1);
       if (isEngine && supported.length === 0 && elm && elm.supported) {
         elm.supported.forEach(function (pid) { supported.push(pid); }); // the adapter's own list
       }
@@ -596,10 +607,25 @@ async function carScan(step, progress) {
       }
       requests.push({ tx: tx, rx: rx, txExt: ext, rxExt: rxExt, req: "22F187" });
     });
+    // 0.38.4: a VW on 29-bit OBD (the 2025 Tiguan) answers diagnostics at the same addresses as its OBD, 18 DA 01 F1
+    // (engine) and 18 DA 02 F1 (gearbox), not on the library's 11-bit ids: its engine and gearbox lists are asked there too
+    if (car29 && found.group === "vag") {
+      library.mods.forEach(function (mod, index) {
+        let address = 0;
+        if (mod[0] === "7E0") address = 0x01;
+        if (mod[0] === "7E1") address = 0x02;
+        if (!address) return;
+        libraryMods.push(index);
+        requests.push({ tx: 0x18DA00F1 + address * 256, rx: 0, txExt: 0, rxExt: 0, req: "22F187" }); // rx 0: worked out
+      });
+    }
     const answers = await carAsk(link, requests, function (asked, total) { progress(0.1 + 0.1 * asked / Math.max(total, 1), "Modules"); });
     answers.forEach(function (answer, i) {
       if (answer.s === 3) {
         return; // nobody there
+      }
+      if (udsModules.some(function (m) { return m.lib === libraryMods[i]; })) {
+        return; // 0.38.4: the same module found on its other ids already (11-bit and 29-bit)
       }
       const mod = library.mods[libraryMods[i]];
       const request = requests[i];
@@ -611,6 +637,7 @@ async function carScan(step, progress) {
       if (found.group === "bmw" && CAR_BMW_NAMES[request.txExt]) {
         name = CAR_BMW_NAMES[request.txExt]; // 0.37.6: BMW's modules by what they are, not "Module 6F1 ext 12"
       }
+      name = carDiagName(name); // 0.38.4: "Engine (diagnostics)", next to "Engine (OBD)": how its values are read
       udsModules.push({ lib: libraryMods[i], name: name, proto: "uds", addr: mod[3] || 0, tx: request.tx, rx: request.rx,
         txExt: request.txExt, rxExt: request.rxExt, ident: part });
     });
@@ -892,12 +919,41 @@ function carBuildCard() {
     '</div>' +
     '<div class="car-progress" id="carProgress" style="display:none"><div class="car-bar"><span id="carBar"></span></div><div class="help" id="carProgressText"></div></div>' +
     '<div class="mono" id="carLog" style="display:none"></div>' +
-    '<div id="carValues"></div>' + // 0.37.7: every value found, by module
+    '<div id="carValues"></div>' + // 0.37.7: every value found, by module (0.38.4: each with Add to Gauge)
     '<div class="help">Ignition on. The gauge asks the car through its CAN wire or the OBD adapter (and the K-line on older VWs), ' +
-    'and keeps only what answers. Then pick Source = Car on a gauge (Gauges tab). The gauge\'s screen shows the scan as it goes.</div>';
+    'and keeps only what answers. Open a module to add any of its values to a gauge, or use the Suggested Gauges below. ' +
+    'The gauge\'s screen shows the scan as it goes.</div>';
   page.insertBefore(card, page.firstChild);
+  // 0.38.4: Suggested Gauges, as First Boot makes them, under the scan
+  const suggest = document.createElement("section");
+  suggest.className = "card";
+  suggest.id = "carSuggestCard";
+  suggest.style.display = "none";
+  suggest.innerHTML =
+    '<h2>Suggested Gauges</h2>' +
+    '<div class="help">A starter set from the scan, the same as First Boot makes: the best values from every source the ' +
+    'gauge has (the engine, the gearbox, adc2can, usb2ip, OpenHaldex, the car\'s other modules), 8 ticked. Untick or ' +
+    'reorder any, then Use These Gauges and Triggers: the gauges replace the ones on the Gauges tab, and the ticked ' +
+    'triggers the ones on the Triggers tab (none ticked: the triggers stay as they are).</div>' +
+    '<div id="carPages"></div>' +
+    '<div class="fb-menu-title" style="margin-top:14px">Triggers</div>' +
+    '<div id="carTriggers"></div>' +
+    '<div class="row-inline" data-nosave="1"><button class="btn" id="carUseBtn" style="flex:0 1 260px">Use These Gauges and Triggers</button></div>';
+  card.after(suggest);
   $("carSummary").textContent = carSummary();
   carShowValues();
+  $("carValues").addEventListener("click", function (event) {
+    const button = event.target.closest("[data-caradd]");
+    if (button) carAddToGauge(Number(button.dataset.caradd));
+  });
+  $("carPages").addEventListener("change", function (event) { fbPageListClick(event, carCandidates, carDrawSuggested); });
+  $("carPages").addEventListener("click", function (event) {
+    if (event.target.closest("[data-fbmove]")) fbPageListClick(event, carCandidates, carDrawSuggested);
+  });
+  $("carTriggers").addEventListener("change", function (event) { fbTriggerListClick(event, carTriggerCandidates, carDrawSuggested); });
+  $("carUseBtn").addEventListener("click", carUseSuggested);
+  const tab = document.querySelector('.nav-tab[data-page="carscan"]');
+  if (tab) tab.addEventListener("click", carSuggestDraw); // made when the tab opens: it asks the gauge what it has now
   $("carScanBtn").addEventListener("click", function () {
     carRunScan($("carLog"), $("carProgress"), $("carBar"), $("carProgressText"), null, null, true); // + on the screen
   });
@@ -958,11 +1014,18 @@ async function carRunScan(logBox, progressBox, bar, progressText, onDone, onProg
   try {
     const found = await carScan(step, progress);
     if (found) {
-      step("Found " + found.values.length + " values. Pick Source = Car on a gauge.");
+      // 0.38.4: what came from where, then what to do with it
+      const perModule = found.modules.map(function (module, moduleIndex) {
+        const count = found.values.filter(function (v) { return v.m === moduleIndex; }).length;
+        return module.name + " " + count;
+      }).filter(function (text) { return !/ 0$/.test(text); });
+      step("Found " + found.values.length + " values: " + perModule.join(", ") + ".");
+      step("Add any of them to a gauge below (open a module), or use the Suggested Gauges and Triggers.");
       toast("scan done: " + found.values.length + " values");
       if ($("carSummary")) $("carSummary").textContent = carSummary();
       carShowValues();
       carRefreshPickers(); // 0.37.11: the Gauges tab's Car lists get the new values straight away
+      carSuggestDraw();    // 0.38.4: Scan My Car's Suggested Gauges from the new scan
       if (onScreen) screenProgress("SCANNED", found.values.length + " values found", 100, 3000);
       if (onDone) onDone(found);
     } else {
@@ -1142,15 +1205,132 @@ function carShowValues() {
     box.innerHTML = "";
     return;
   }
+  const open = {}; // the modules open now stay open when the list is drawn again (after an Add to Gauge)
+  box.querySelectorAll("details[open]").forEach(function (d) { open[d.dataset.module] = true; });
   box.innerHTML = carCatalog.modules.map(function (module, moduleIndex) {
     const rows = carModuleRows(moduleIndex);
     if (!rows.length) return "";
     let title = module.name;
     if (module.proto === "kline") title = title + " (K-line)";
-    const lines = rows.map(function (i) { return esc(carValueLabel(carCatalog.values[i])); }).join("\n");
-    return '<details class="car-module"><summary>' + esc(title) + " - " + rows.length + " values</summary>" +
-      '<div class="mono">' + lines + "</div></details>";
+    // 0.38.4: each value with Add to Gauge, or the gauge it's on already
+    const lines = rows.map(function (i) {
+      const onGauge = carGaugeOf(i);
+      let action = '<button class="btn-secondary" data-caradd="' + i + '">Add to Gauge</button>';
+      if (onGauge >= 0) action = '<span class="car-on">Gauge ' + (onGauge + 1) + "</span>";
+      return '<div class="car-value"><span>' + esc(carValueLabel(carCatalog.values[i])) + "</span>" + action + "</div>";
+    }).join("");
+    let openText = "";
+    if (open[moduleIndex]) openText = " open";
+    return '<details class="car-module" data-module="' + moduleIndex + '"' + openText + "><summary>" + esc(title) + " - " +
+      rows.length + " values</summary>" + lines + "</details>";
   }).join("");
+}
+
+// 0.38.4: the gauge (0-7) that shows scanned value index now, -1 = none
+function carGaugeOf(index) {
+  if (!settingsCache || !settingsCache.pages) return -1;
+  const wanted = carOptionValue(index);
+  for (let i = 0; i < settingsCache.pages.length; i++) {
+    const page = settingsCache.pages[i];
+    if (page.enabled && page.source === "car" && carMatchOption(page.signal) === wanted) return i;
+  }
+  return -1;
+}
+
+// 0.38.4: a gauge range from a scanned value's unit [min, max, decimals], in the unit the gauge shows it in
+const CAR_UNIT_RANGES = {
+  "c": [0, 150, 0], "°c": [0, 150, 0], "bar": [0, 3, 2], "kpa": [0, 300, 0], "mbar": [0, 3000, 0], "hpa": [0, 3000, 0],
+  "rpm": [0, 8000, 0], "krpm": [0, 250, 0], "%": [0, 100, 0], "km/h": [0, 280, 0], "v": [10, 16, 1], "deg": [-10, 40, 1],
+  "nm": [0, 500, 0], "afr": [10, 20, 1], "ms": [0, 20, 1], "l": [0, 80, 0], "l/h": [0, 30, 1], "a": [0, 100, 0],
+};
+function carRangeFor(value) {
+  const unit = String(value.unit || "");
+  const row = CAR_UNIT_RANGES[unit.toLowerCase()] || [0, 100, 0];
+  const span = row[1] - row[0];
+  return { min: unitShowRange("", row[0], unit, span), max: unitShowRange("", row[1], unit, span), decimals: row[2] };
+}
+
+// 0.38.4: a gauge page for scanned value index (Source = Car): its name as the label, a range from its unit
+function carPageFor(index) {
+  const value = carCatalog.values[index];
+  let key = ""; // the gauge's own value of the same kind, when it has one (an OBD PID's)
+  if (value.k === "obd") {
+    const row = OBD_PIDS.find(function (p) { return p[0] === value.id; });
+    if (row && row[2]) key = row[2];
+  }
+  const page = fbCarPage(carOptionValue(index), String(value.name).toUpperCase().substring(0, 15), key, value);
+  if (/\bgear\b/i.test(value.name) && !value.unit) page.style = FB_STYLE.numeric; // a gear as a number
+  return page;
+}
+
+// 0.38.4: Add to Gauge - the value onto the first gauge that's switched off and empty (else the first switched off),
+// saved straight away like any Gauges tab change
+async function carAddToGauge(index) {
+  if (!carCatalog || !carCatalog.values[index] || !settingsCache) return;
+  const pages = collectPages(); // the Gauges tab as it is, unsaved typing included
+  let free = pages.findIndex(function (p) { return !p.enabled && (!p.signal || p.signal === "none"); });
+  if (free < 0) free = pages.findIndex(function (p) { return !p.enabled; });
+  if (free < 0) {
+    toast("all 8 gauges are in use - switch one off on the Gauges tab first");
+    return;
+  }
+  const page = carPageFor(index);
+  page.signal = carResolve(page.signal); // a diagnostics value takes its slot now
+  if (page.signal === "none") return;    // all 32 slots in use (carSlotFor said so)
+  page.sprite = pages[free].sprite || "";
+  page.spriteOn = 0;
+  pages[free] = page;
+  settingsCache.pages = pages;
+  renderPages();
+  await saveSettings(Object.assign({ pages: pages }, carSettingsExtra()), "added as gauge " + (free + 1) + " - screen rebuilt");
+  carShowValues();
+}
+
+// ---------------------------------------------------------------------------
+// 0.38.4: Suggested Gauges on the Scan My Car tab - First Boot's starter set (firstboot.js fbBuildCandidates), from
+// the last scan and what the gauge has now
+// ---------------------------------------------------------------------------
+let carCandidates = [];        // the gauges on offer: {key, picked, page, why, live, group}
+let carTriggerCandidates = []; // the triggers on offer: {trigger, why, picked}
+
+async function carSuggestDraw() {
+  const card = $("carSuggestCard");
+  if (!card || typeof fbBuildCandidates === "undefined" || carScanning) return;
+  if (!carCatalog || !carCatalog.values.length) {
+    card.style.display = "none";
+    return;
+  }
+  const found = await fbFoundNow();
+  carCandidates = fbBuildCandidates(found);
+  carTriggerCandidates = fbBuildTriggers(found);
+  card.style.display = "";
+  carDrawSuggested();
+}
+
+function carDrawSuggested() {
+  fbDrawPageList($("carPages"), carCandidates);
+  fbDrawTriggerList($("carTriggers"), carTriggerCandidates);
+}
+
+// Use These Gauges and Triggers: the ticked gauges in order become the 8 gauges (the rest switched off), as First
+// Boot's Apply does, and the ticked triggers the 8 triggers (none ticked: the triggers are left as they are)
+async function carUseSuggested() {
+  const picked = carCandidates.filter(function (c) { return c.picked; });
+  const triggersPicked = carTriggerCandidates.filter(function (c) { return c.picked; });
+  if (!picked.length) return toast("tick at least one gauge");
+  let question = "Use these " + picked.length + " gauges?\n\nThey replace the gauges on the Gauges tab, in this order.";
+  if (triggersPicked.length) {
+    question = question + "\nThe " + triggersPicked.length + " ticked triggers replace the ones on the Triggers tab.";
+  }
+  if (!confirm(question)) return;
+  const body = Object.assign({ pages: fbPagesFromCandidates(carCandidates, false) }, carSettingsExtra());
+  if (triggersPicked.length) {
+    body.triggers = fbTriggersFromList(carTriggerCandidates);
+  }
+  await saveSettings(body, "gauges and triggers saved - screen rebuilt");
+  renderPages();
+  if (typeof renderTriggers === "function") renderTriggers(); // the Triggers tab shows the new ones
+  carShowValues();
 }
 
 // draws the Car picker into host (as app.js srcPicker does for the other sources)
@@ -1262,28 +1442,77 @@ function carPickerValue(host) {
 // ---------------------------------------------------------------------------
 // First Boot (firstboot.js): the values worth a gauge, found by name in the scan
 // ---------------------------------------------------------------------------
+// the modules whose "oil temperature" is the gearbox's or the AWD's, not the engine's
+const CAR_DRIVELINE = /gearbox|transmission|awd|haldex|all.?wheel/i;
+// a value the car aims for, not what it reads: never a suggested gauge
+const CAR_NOT_A_READING = /(target|specified|setpoint|desired|\btgt\b|limit)/i;
+// the kinds of gauge a starter set offers from the scan: [key, label, does this value (name, module name) fit].
+// 0.38.4: more kinds, and the gearbox's own (clutch, gearbox oil) told apart from the engine's
 const CAR_SUGGEST = [
-  ["oiltemp", /oil temp/i, "OIL TEMP"],
-  ["boost", /(boost|charge air|charge pressure|intake manifold pressure)/i, "BOOST"],
-  ["iat", /(intake air temp|charge air temp)/i, "INTAKE"],
-  ["egt", /exhaust gas temp/i, "EGT"],
-  ["gboxTemp", /(gearbox|transmission|clutch).*(temp)/i, "GEARBOX"],
-  ["lambda", /lambda/i, "LAMBDA"],
-  ["gear", /^(current |engaged |actual )?gear( engaged| actual)?$/i, "GEAR"], // 0.37.13: First Boot's starter pack
-  ["throttle", /(accelerator pedal|pedal position)/i, "THROTTLE"],         // 0.37.13: a module's pedal when OBD has none
+  ["oiltemp", "OIL TEMP", function (name, module) { return /oil temp/i.test(name) && !CAR_DRIVELINE.test(module); }],
+  ["boost", "BOOST", function (name) { return /(boost|charge air press|charge pressure|intake manifold (absolute )?pressure|^map$)/i.test(name); }],
+  ["iat", "INTAKE", function (name) { return /(intake air temp|charge air temp)/i.test(name); }],
+  ["egt", "EGT", function (name) { return /exhaust gas temp/i.test(name); }],
+  ["gboxTemp", "GEARBOX", function (name, module) {
+    if (/clutch/i.test(name)) return false; // the clutch has a gauge of its own
+    return /(gearbox|transmission|atf).*temp/i.test(name) || (/gearbox|transmission/i.test(module) && /(oil|fluid|sump).*temp/i.test(name));
+  }],
+  ["clutchTemp", "CLUTCH", function (name, module) { return /clutch.*temp/i.test(name) && /gearbox|transmission/i.test(module); }],
+  ["lambda", "LAMBDA", function (name) { return /lambda/i.test(name); }],
+  ["gear", "GEAR", function (name) { return /^(current |engaged |actual )?gear( engaged| actual)?$/i.test(name); }], // First Boot's starter pack
+  ["throttle", "THROTTLE", function (name) { return /(accelerator pedal|pedal position)/i.test(name); }],         // a module's pedal when OBD has none
+  ["oilPressure", "OIL PRESS", function (name, module) { return /oil pressure/i.test(name) && !CAR_DRIVELINE.test(module); }],
+  ["fuelPressure", "FUEL PRESS", function (name) { return /(rail|fuel) pressure/i.test(name); }],
+  ["turbo", "TURBO", function (name) { return /turbo(charger)? speed/i.test(name); }],
+  ["knock", "KNOCK", function (name) { return /knock/i.test(name); }],
 ];
 
-// [key, "cv:<index>" or "pid:.." / "kl:..", label] for each kind of value the scan has (tested ones first)
+// a module's short name for a gauge label: "Gearbox (diagnostics)" -> "Gearbox"
+function carModuleShort(name) {
+  return String(name || "").replace(/ \(.*$/, "");
+}
+
+// a module read by diagnostics (UDS): "Engine (diagnostics)", told apart from "Engine (OBD)"
+function carDiagName(name) {
+  if (/\(29-bit\)$/.test(name)) return name.replace(/\(29-bit\)$/, "(diagnostics, 29-bit)");
+  return name + " (diagnostics)";
+}
+
+// [key, "cv:<index>" or "pid:.." / "kl:..", label, value] for each kind of value the scan has (tested ones first),
+// each value used once. 0.38.4: then one from each other module the scan found (the AWD, the brakes ...) - its
+// likeliest reading: a temperature, then a pressure, then a speed - so nothing the car has is left out
 function carSuggestions() {
   const out = [];
   if (!carCatalog) return out;
+  const used = {}; // value index -> true once it is offered
+  const usable = function (i) { return !used[i] && !CAR_NOT_A_READING.test(String(carCatalog.values[i].name)); };
   CAR_SUGGEST.forEach(function (row) {
     let best = -1;
     carCatalog.values.forEach(function (value, i) {
-      if (!row[1].test(value.name)) return;
+      if (!usable(i)) return;
+      const module = (carCatalog.modules[value.m] || {}).name || "";
+      if (!row[2](String(value.name), module)) return;
       if (best < 0 || (value.conf && !carCatalog.values[best].conf)) best = i;
     });
-    if (best >= 0) out.push([row[0], carOptionValue(best), row[2], carCatalog.values[best]]);
+    if (best >= 0) {
+      used[best] = true;
+      out.push([row[0], carOptionValue(best), row[1], carCatalog.values[best]]);
+    }
+  });
+  carCatalog.modules.forEach(function (module, moduleIndex) {
+    if (/engine/i.test(module.name) || module.addr === 1) return; // the engine is covered by the kinds above
+    if (out.some(function (row) { return row[3].m === moduleIndex; })) return; // it has one already
+    const rows = carModuleRows(moduleIndex).filter(usable); // tested ones first
+    let best = -1;
+    [/temp/i, /pressure/i, /speed|rpm/i, /./].forEach(function (pattern) {
+      rows.forEach(function (i) {
+        if (best < 0 && pattern.test(String(carCatalog.values[i].name))) best = i;
+      });
+    });
+    if (best < 0) return;
+    used[best] = true;
+    const label = (carModuleShort(module.name) + " " + carCatalog.values[best].name).toUpperCase().substring(0, 15);
+    out.push(["mod" + moduleIndex, carOptionValue(best), label, carCatalog.values[best]]);
   });
   return out;
 }
@@ -1291,21 +1520,24 @@ function carSuggestions() {
 // ---------------------------------------------------------------------------
 // setup
 // ---------------------------------------------------------------------------
-function carAddStyle() {
+// (its own name: car.js has a carAddStyle too, and the later file's would replace this one for both)
+function carScanAddStyle() {
   const style = document.createElement("style");
   style.textContent =
     ".car-progress { margin: 10px 0; }" +
     ".car-bar { height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }" +
     ".car-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }" +
-    ".car-module { margin-top: 8px; } .car-module summary { cursor: pointer; color: var(--accent); }";
+    ".car-module { margin-top: 8px; } .car-module summary { cursor: pointer; color: var(--accent); }" +
+    ".car-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }" +
+    ".car-value button { flex: 0 0 auto; padding: 4px 10px; } .car-on { flex: 0 0 auto; color: var(--accent); }";
   document.head.appendChild(style);
 }
 
-async function carSetup() {
-  carAddStyle();
+async function carScanSetup() {
+  carScanAddStyle();
   carBuildCard();
   await carLoadCatalog();
   if ($("carSummary")) $("carSummary").textContent = carSummary();
   carShowValues();
 }
-document.addEventListener("DOMContentLoaded", carSetup);
+document.addEventListener("DOMContentLoaded", carScanSetup);

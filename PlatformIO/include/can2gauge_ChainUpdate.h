@@ -17,8 +17,9 @@
 
 #define CHAIN_UPDATE_PROTO 1  // sent in the heartbeat: 0 = a gauge that can't take a chain update (before 0.25.0)
 #define CHAIN_UPDATE_RESULTS 16 // gauges listed in the web UI's result list
+#define CHAIN_SETUP_FILE "/fbsetup.json" // 0.38.7: First Boot's setup for the other gauges (POST /api/chain/setup)
 
-// how one gauge got on in the last "Update Other Gauges"
+// how one gauge got on in the last "Update All Gauges"
 struct ChainUpdateResult
 {
   uint8_t node;   // its node id
@@ -40,9 +41,12 @@ struct ChainUpdateStatus
 
 void setupChainUpdate();                                                    // the queue for incoming packets
 void chainUpdateOnEspNow(const uint8_t *mac, const uint8_t *data, int len); // a 'C' 'U' packet (from the WiFi task)
-bool chainUpdateStart(String &reason);                                      // web UI "Update Other Gauges"
+bool chainUpdateStart(String &reason); // web UI "Update All Gauges": this gauge sends, or (0.39.5) asks the gauge with newer
+                                      // firmware to
 void chainUpdateStop();                                                     // web UI "Stop"
 bool chainUpdateBusy();                                                     // sending or receiving (no sleep, no web update)
 void chainUpdateGetStatus(ChainUpdateStatus &out);                          // a copy for the web UI
 uint8_t chainUpdateBoardId();                                               // which board this firmware is built for
+bool chainSetupStart(String &reason); // 0.38.7: First Boot's setup (in /fbsetup.json) to every other gauge in the chain
+void chainSetupStartPage();           // 0.38.7: this gauge's start page by its place in the row (a shared setup)
 void chainUpdateVersion(uint8_t version[3]);                                // CAN2GAUGE_VERSION as 3 numbers

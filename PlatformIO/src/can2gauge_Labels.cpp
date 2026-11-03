@@ -13,6 +13,15 @@
 static char *labelText = NULL;
 static const char *(*labelEntry)[5][3] = NULL; // [256][5][3]
 static SemaphoreHandle_t choiceMutex = NULL;
+static SemaphoreHandle_t findMutex = NULL; // one labelsFind at a time (the K-line task and the web server both call it)
+
+static uint8_t findLabelFiles(uint8_t addr, const char *ident, char out[][LBL_NAME_LEN], uint8_t max); // below
+
+// makes the lookup's lock (in setup, before the K-line task and the web server start)
+void setupLabels()
+{
+  findMutex = xSemaphoreCreateMutex();
+}
 
 void labelsPartOf(const char *ident, char *part, size_t len)
 {
@@ -136,7 +145,20 @@ bool labelsPrepare()
   return true;
 }
 
+// the lookup below shares one list of matches, so only one task does it at a time
 uint8_t labelsFind(uint8_t addr, const char *ident, char out[][LBL_NAME_LEN], uint8_t max)
+{
+  if (findMutex == NULL)
+  {
+    return 0; // setupLabels() hasn't run
+  }
+  xSemaphoreTake(findMutex, portMAX_DELAY);
+  const uint8_t count = findLabelFiles(addr, ident, out, max);
+  xSemaphoreGive(findMutex);
+  return count;
+}
+
+static uint8_t findLabelFiles(uint8_t addr, const char *ident, char out[][LBL_NAME_LEN], uint8_t max)
 {
   char part[16];
   char identUpper[64];
@@ -164,7 +186,7 @@ uint8_t labelsFind(uint8_t addr, const char *ident, char out[][LBL_NAME_LEN], ui
     int8_t score;
     char name[LBL_NAME_LEN];
   };
-  EXT_RAM_BSS_ATTR static Hit hits[24]; // K-line task only
+  EXT_RAM_BSS_ATTR static Hit hits[24]; // shared: labelsFind's lock keeps it to one task at a time
   uint8_t hitCount = 0;
   char line[128];
   char *fields[5] = {};

@@ -376,6 +376,12 @@ void bleDisconnect()
   if (client && client->isConnected())
   {
     client->disconnect();
+    // NimBLE only lets go once the disconnect event arrives: wait for it (up to 2 s), or the next connect is refused
+    const uint32_t waitStartMs = millis();
+    while (client->isConnected() && millis() - waitStartMs < 2000)
+    {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
   }
   linkUp = false;
   rxCharacteristic = nullptr;

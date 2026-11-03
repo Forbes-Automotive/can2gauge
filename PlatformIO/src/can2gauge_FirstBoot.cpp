@@ -1,25 +1,27 @@
-// First Boot setup: the state in NVS, the question on the glass, and GET / POST /api/firstboot (see can2gauge_FirstBoot.h).
+// First Boot setup: the state in NVS, the question on the screen, and GET / POST /api/firstboot (see can2gauge_FirstBoot.h).
 // The checks of each source and the suggested settings run in the web UI (data/firstboot.js), on the endpoints the
 // other tabs already use; this file only remembers where the driver is in it.
 #include <can2gauge_FirstBoot.h>
 #include <can2gauge_API.h> // webServer
 #include <ArduinoJson.h>
-#include <can2gauge_RAM.h> // 0.25.4: psramJsonAllocator() - the JSON built in PSRAM, not internal RAM
+#include <can2gauge_RAM.h> // psramJsonAllocator(): the JSON built in PSRAM, not internal RAM
 #include <Preferences.h>
-#include <FirstBootPrompt.h> // the cards on the glass (lib/GaugeUI)
-#include <LVGL_Driver.h>     // 0.24.11: lvglTouchPresent() - no touch, no question the glass can't answer
-#include <GaugeUI.h>         // 0.37.3: uiProgress() - the "SETTING UP" ring while the setup runs on the phone
+#include <FirstBootPrompt.h> // the cards on the screen (lib/GaugeUI)
+#include <LVGL_Driver.h>     // lvglTouchPresent(): no touch, no question the screen can't answer
+#include <GaugeUI.h>         // uiProgress(): the "SETTING UP" ring while the setup runs on the phone
 
+// ===== Settings for this file =====
 #define FIRSTBOOT_NAMESPACE "c2gfirstboot" // NVS namespace of its own (15 characters at most)
 #define FIRSTBOOT_KEY "state"              // FIRSTBOOT_ASK / _WAITING / _DONE
 #define FIRSTBOOT_ADDRESS "192.168.1.1"    // the gauge's own access point (src/can2gauge_WiFi.cpp softAPConfig)
 #define FIRSTBOOT_ASK_DELAY_MS 2700        // question after the boot logo (2.2 s) and its fade into the first page
-
 #define FIRSTBOOT_OBD_PROBE_MS 8000        // how long the First Boot check asks the engine for OBD-II over CAN
 
-static uint8_t firstBootStateNow = FIRSTBOOT_DONE; // static = private to this file; read with firstBootState()
+// ===== Variables for this file =====
 static uint32_t obdProbeUntilMs = 0;               // millis() the OBD-II over CAN check ends (0 = not running)
+static uint8_t firstBootStateNow = FIRSTBOOT_DONE; // static = private to this file; read with firstBootState()
 
+// ===== Small helpers =====
 // the state as the web UI names it
 static const char *stateName(uint8_t state)
 {
@@ -34,37 +36,15 @@ static const char *stateName(uint8_t state)
   return "done";
 }
 
-void firstBootSetState(uint8_t state)
-{
-  firstBootStateNow = state;
-  Preferences prefs;
-  prefs.begin(FIRSTBOOT_NAMESPACE, false);
-  prefs.putUChar(FIRSTBOOT_KEY, state);
-  prefs.end();
-  DEBUG("First Boot: %s", stateName(state));
-}
-
-uint8_t firstBootState()
-{
-  return firstBootStateNow;
-}
-
-bool firstBootObdProbe()
-{
-  if (obdProbeUntilMs == 0)
-  {
-    return false;
-  }
-  if ((int32_t)(millis() - obdProbeUntilMs) >= 0) // the cast keeps the sum right when millis() wraps round (49 days)
-  {
-    obdProbeUntilMs = 0;
-    return false;
-  }
-  return true;
-}
+// ===== Functions in this file =====
+static void answeredOnGlass(bool yes);                         // the driver's Yes / Not Now on the screen
+static void firstBootOutgoing(AsyncWebServerRequest *request); // GET /api/firstboot
+static void firstBootPostDone(AsyncWebServerRequest *request); // POST /api/firstboot, the request itself
+static void firstBootIncoming(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total); // POST body
+static void sendFirstBootJson(AsyncWebServerRequest *request, int code, JsonDocument &doc); // sends a JSON reply
 
 // Runs before readEEP(), because readEEP() writes the default settings on a brand-new gauge: once it has run, every
-// gauge "has settings". A gauge that had settings before this firmware arrived is already set up, so it never asks.
+// gauge "has settings". A gauge that had settings before First Boot existed is already set up, so it never asks.
 void firstBootCheck()
 {
   DEBUG("Checking first boot...");
@@ -82,7 +62,7 @@ void firstBootCheck()
     return;
   }
 
-  // no state saved yet: a brand-new gauge, or one set up on firmware from before first boot existed
+  // no state saved yet: a brand-new gauge, or one set up on firmware from before First Boot existed
   bool hadSettings = false;
   Preferences settingsPrefs;
   if (settingsPrefs.begin("can2gauge", true)) // read-only; false when the namespace doesn't exist yet (brand new)
@@ -101,19 +81,8 @@ void firstBootCheck()
   DEBUG("Checked first boot!");
 }
 
-// the driver answered the question on the glass (runs in the display task)
-static void answeredOnGlass(bool yes)
-{
-  if (yes)
-  {
-    firstBootSetState(FIRSTBOOT_WAITING);
-  }
-  else
-  {
-    firstBootSetState(FIRSTBOOT_DONE);
-  }
-}
-
+// after setupDisplay(): a gauge not set up yet asks "Set this gauge up from your phone?" on the screen, or shows how to
+// log in when the driver already said Yes
 void firstBootPrompt()
 {
   if (runtime.wokeFromSleep)
@@ -132,8 +101,8 @@ void firstBootPrompt()
   }
   char localName[NAME_LEN + 8];
   snprintf(localName, sizeof(localName), "%s.local", settings.hostname); // c2g.local on a new gauge
-  // the login card straight away when Yes was said on an earlier boot - or (0.24.11) when the glass has no touch, so
-  // the Yes / Not Now question could never be answered (the card goes once the setup page opens on the phone)
+  // the login card straight away when Yes was said on an earlier boot - or when the screen has no touch, so the
+  // Yes / Not Now question could never be answered (the card goes once the setup page opens on the phone)
   bool loginFirst = false;
   if (firstBootStateNow == FIRSTBOOT_WAITING || !lvglTouchPresent())
   {
@@ -143,23 +112,64 @@ void firstBootPrompt()
                  loginFirst);
 }
 
-// sends a JSON reply. AsyncWebServer hands every request over as a pointer, so this one uses the arrow (->) to reach it.
-static void sendFirstBootJson(AsyncWebServerRequest *request, int code, JsonDocument &doc)
+// the web UI's GET / POST /api/firstboot (called from setupWebServer, before the server starts)
+void setupFirstBootRoutes()
 {
-  // the buffer made the right size up front, so it never has to grow and copy (see sendJSON in can2gauge_API.cpp)
-  const size_t replyLength = measureJson(doc);
-  AsyncResponseStream *response = request->beginResponseStream("application/json", replyLength + 64);
-  serializeJson(doc, *response);
-  response->setCode(code);
-  request->send(response);
+  webServer.on("/api/firstboot", HTTP_GET, firstBootOutgoing);
+  webServer.on("/api/firstboot", HTTP_POST, firstBootPostDone, NULL, firstBootIncoming);
 }
 
-// GET /api/firstboot: where the driver is in the setup, and how the glass told them to log in
+// a new First Boot state, saved to NVS at once
+void firstBootSetState(uint8_t state)
+{
+  firstBootStateNow = state;
+  Preferences prefs;
+  prefs.begin(FIRSTBOOT_NAMESPACE, false);
+  prefs.putUChar(FIRSTBOOT_KEY, state);
+  prefs.end();
+  DEBUG("First Boot: %s", stateName(state));
+}
+
+// where the gauge is in the setup: FIRSTBOOT_ASK / _WAITING / _DONE
+uint8_t firstBootState()
+{
+  return firstBootStateNow;
+}
+
+// true while the First Boot check is asking the engine for OBD-II over CAN (a few seconds after the phone asks)
+bool firstBootObdProbe()
+{
+  if (obdProbeUntilMs == 0)
+  {
+    return false;
+  }
+  if ((int32_t)(millis() - obdProbeUntilMs) >= 0) // the cast keeps the sum right when millis() wraps round (49 days)
+  {
+    obdProbeUntilMs = 0;
+    return false;
+  }
+  return true;
+}
+
+// the driver answered the question on the screen (runs in the display task)
+static void answeredOnGlass(bool yes)
+{
+  if (yes)
+  {
+    firstBootSetState(FIRSTBOOT_WAITING);
+  }
+  else
+  {
+    firstBootSetState(FIRSTBOOT_DONE);
+  }
+}
+
+// GET /api/firstboot: where the driver is in the setup, and how the screen told them to log in
 static void firstBootOutgoing(AsyncWebServerRequest *request)
 {
   JsonDocument doc(psramJsonAllocator());
   doc["state"] = stateName(firstBootStateNow);
-  doc["glass"] = uiFirstBootShowing(); // the question / login card is on the glass
+  doc["glass"] = uiFirstBootShowing(); // the question / login card is on the screen
   doc["wifiName"] = settings.apSsid;
   doc["address"] = FIRSTBOOT_ADDRESS;
   doc["local"] = settings.hostname; // + ".local"
@@ -169,13 +179,17 @@ static void firstBootOutgoing(AsyncWebServerRequest *request)
 // POST /api/firstboot, the request itself: the reply is sent from the body below
 static void firstBootPostDone(AsyncWebServerRequest *request)
 {
+  (void)request; // not used: firstBootIncoming sends the reply
 }
 
-// POST /api/firstboot body: {"opened": true} the setup page is open (the glass card goes); {"obdProbe": true} ask the
-// engine for OBD-II over CAN for a few seconds (the check's "OBD-II over CAN" row), whatever the CAN profile;
-// {"state": "waiting" | "done" | "ask"} Settings > First Boot setup / Finish / Skip.
-// 0.37.3: {"screen": {"detail": "Scanning 01 Engine", "pct": 45}} the setup's progress on the screen (a ring that stays
-// until the setup ends; 0.37.5: + "title", "hideMs", "failed" for the Scan My Car tab); {"state": "done", "applied": true} = Apply (the ring says SET UP, then goes), without = Skip
+// POST /api/firstboot body:
+//   {"opened": true}    the setup page is open on the phone (the login card on the screen goes)
+//   {"obdProbe": true}  ask the engine for OBD-II over CAN for a few seconds (the check's "OBD-II over CAN" row),
+//                       whatever the CAN profile
+//   {"state": "waiting" | "done" | "ask"}  Settings > First Boot setup / Finish / Skip. {"state": "done",
+//                       "applied": true} = Apply (the ring says SET UP, then goes), without "applied" = Skip
+//   {"screen": {"detail": "Scanning 01 Engine", "pct": 45}}  the setup's progress on the screen (a ring that stays
+//                       until the setup ends), with "title", "hideMs", "failed" for the Scan My Car tab
 static void firstBootIncoming(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
 {
   JsonDocument reply(psramJsonAllocator());
@@ -197,13 +211,13 @@ static void firstBootIncoming(AsyncWebServerRequest *request, uint8_t *data, siz
   if (opened)
   {
     uiFirstBootHide(); // the driver is in the web UI: the login card has done its job
-    uiProgress("SETTING UP", "finish on your phone", 0); // 0.37.3: the screen says the setup is running
+    uiProgress("SETTING UP", "finish on your phone", 0); // the screen says the setup is running
   }
   JsonObjectConst screenObj = doc["screen"];
-  if (!screenObj.isNull()) // 0.37.3: the setup's progress, as the phone reports it
+  if (!screenObj.isNull()) // the setup's progress, as the phone reports it
   {
-    // 0.37.5: also the Scan My Car tab's scan: its own title ("SCANNING"), and at the end how long the last word stays
-    // up before the ring fades (hideMs), red for a scan that found no way in (failed)
+    // also the Scan My Car tab's scan: its own title ("SCANNING"), and at the end how long the last word stays up
+    // before the ring fades (hideMs), red for a scan that found no way in (failed)
     const char *title = screenObj["title"] | "SETTING UP";
     const bool isSetup = !strcmp(title, "SETTING UP");
     const uint32_t hideMs = screenObj["hideMs"] | 0;
@@ -221,8 +235,8 @@ static void firstBootIncoming(AsyncWebServerRequest *request, uint8_t *data, siz
     {
       percent = 0;
     }
-    // 0.37.7: a setup update that arrives after Apply / Skip (it was on its way when the setup ended) is dropped, or
-    // it would put the ring back up with nothing to take it away (bench: stuck at 52 % after saving)
+    // a setup update that arrives after Apply / Skip (it was on its way when the setup ended) is dropped, or it would
+    // put the ring back up with nothing to take it away (bench: stuck at 52 % after saving)
     if (isSetup && firstBootStateNow == FIRSTBOOT_DONE)
     {
       DEBUG("First Boot: a late setup update dropped (the setup has ended)");
@@ -250,7 +264,7 @@ static void firstBootIncoming(AsyncWebServerRequest *request, uint8_t *data, siz
   {
     firstBootSetState(FIRSTBOOT_DONE);
     uiFirstBootHide();
-    // 0.37.3: the setup ring ends: Apply shows it finished for 3 s, Skip just takes it away
+    // the setup ring ends: Apply shows it finished for 3 s, Skip just takes it away
     const bool applied = doc["applied"] | false;
     if (applied)
     {
@@ -263,15 +277,20 @@ static void firstBootIncoming(AsyncWebServerRequest *request, uint8_t *data, siz
   }
   else if (!strcmp(newState, "ask"))
   {
-    firstBootSetState(FIRSTBOOT_ASK); // asks on the glass at the next boot
+    firstBootSetState(FIRSTBOOT_ASK); // asks on the screen at the next boot
   }
   reply["status"] = "ok";
   reply["state"] = stateName(firstBootStateNow);
   sendFirstBootJson(request, 200, reply);
 }
 
-void setupFirstBootRoutes()
+// sends a JSON reply. AsyncWebServer hands every request over as a pointer, so this one uses the arrow (->) to reach it.
+static void sendFirstBootJson(AsyncWebServerRequest *request, int code, JsonDocument &doc)
 {
-  webServer.on("/api/firstboot", HTTP_GET, firstBootOutgoing);
-  webServer.on("/api/firstboot", HTTP_POST, firstBootPostDone, NULL, firstBootIncoming);
+  // the buffer made the right size up front, so it never has to grow and copy (see sendJSON in can2gauge_API.cpp)
+  const size_t replyLength = measureJson(doc);
+  AsyncResponseStream *response = request->beginResponseStream("application/json", replyLength + 64);
+  serializeJson(doc, *response);
+  response->setCode(code);
+  request->send(response);
 }

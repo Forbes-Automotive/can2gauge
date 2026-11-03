@@ -1,7 +1,24 @@
 {
   "product": "can2gauge",
-  "latest": "0.36.14",
+  "latest": "0.39.7",
   "releases": [
+    {
+      "version": "0.39.7",
+      "channel": "stable",
+      "date": "2026-11-03",
+      "ota": true,
+      "notes": "This update resets every setting: press Download Backup (Settings > Device) first, then Import Backup after. New: First Boot and Scan My Car find every value the car has and suggest gauges and triggers, and can set the other gauges up the same; every Menu and Tabs item is on the screen's menu, with Navigation, usb2ip, Oil and Triggers screens; Update All Gauges from any gauge; Drag Timer; Simos 18; K-line OBD-II on any make; many fixes.",
+      "firmware": {
+        "path": "V0.39.7/firmware.bin",
+        "size": 3308480,
+        "sha256": "1feab004fcce7c876354abee5b5f82c841d556984f60f92d1445b76990bbbe26"
+      },
+      "filesystem": {
+        "path": "V0.39.7/littlefs.bin",
+        "size": 9830400,
+        "sha256": "c75d47f9a8a9a733e0f2e05d2930251a9ddc3fe426de822937beb7b8f69609a6"
+      }
+    },
     {
       "version": "0.36.14",
       "channel": "stable",

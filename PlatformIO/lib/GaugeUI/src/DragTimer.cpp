@@ -547,6 +547,16 @@ void dragClosed()
   state = DRAG_READY;
 }
 
+// a countdown or a run is on: the screensaver mustn't come up over it (ready, a finished run or the scoreboard: it may)
+bool dragIsTiming()
+{
+  if (state == DRAG_COUNTING || state == DRAG_RUNNING)
+  {
+    return true;
+  }
+  return false;
+}
+
 void dragTick()
 {
   if (!dragScreen)

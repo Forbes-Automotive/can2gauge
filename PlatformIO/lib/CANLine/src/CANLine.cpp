@@ -2,9 +2,11 @@
 #include <can2gauge_defs.h>
 
 #define MAX_HANDLERS 10 // 0.30.11: was 8 - boot sync took the last free one
-static canFrameCb_t handlers[MAX_HANDLERS];
-static bool handlerAir[MAX_HANDLERS]; // also gets relayed frames
-static uint8_t handlerCount = 0;
+// volatile: the CAN receive task (core 0) reads these while setup() (core 1) is still adding handlers, so each one
+// must be written in full before the count says it is there
+static volatile canFrameCb_t handlers[MAX_HANDLERS];
+static volatile bool handlerAir[MAX_HANDLERS]; // also gets relayed frames
+static volatile uint8_t handlerCount = 0;
 // relayed frames (canInject): decoded by their own task, under decodeMutex with the RX task
 struct AirFrame
 {
@@ -144,7 +146,7 @@ static void decodeVagPq(const twai_message_t &message)
   case 0x320: // mKombi_1: KO1_Tankinhalt byte 3 (data[2]) bits 0-6 = litres, 127 = error (bit 7 = OBD tank warning)
     if ((data[2] & 0x7F) != 0x7F)
     {
-      signalSetBus(SIG_FUEL_LEVEL, data[2] & 0x7F);
+      signalSetBus(SIG_FUEL_LITRES, data[2] & 0x7F); // litres (OBD's fuel level is a %)
     }
     // Oeldruck data[0] bit 2: read as the oil-pressure warning (it sits among the cluster's lamp bits - charge lamp,
     // glow plug, tank warning, coolant low), so 0 = pressure OK. Unconfirmed on a car: ignition on with the engine off
@@ -311,22 +313,52 @@ static void decodeVagMqb(const twai_message_t &message)
   const uint8_t *data = message.data;
   switch (message.identifier)
   {
-  case 0x0A8: // Motor_12: MO_Drehzahl_01 48|16 * 0.25
-    signalSetBus(SIG_RPM, (((uint16_t)data[7] << 8) | data[6]) * 0.25f);
+  case 0x0A8: // Motor_12: MO_Drehzahl_01 48|16 * 0.25 (0xFFFF = error)
+  {
+    const uint16_t rawRpm = ((uint16_t)data[7] << 8) | data[6];
+    if (rawRpm != 0xFFFF)
+    {
+      signalSetBus(SIG_RPM, rawRpm * 0.25f);
+    }
     break;
-  case 0x0FD: // ESP_21: ESP_v_Signal 32|16 * 0.01 km/h
-    signalSetBus(SIG_SPEED, (((uint16_t)data[5] << 8) | data[4]) * 0.01f);
+  }
+  case 0x0FD: // ESP_21: ESP_v_Signal 32|16 * 0.01 km/h (65533 and up = undervoltage / init / error)
+  {
+    const uint16_t rawSpeed = ((uint16_t)data[5] << 8) | data[4];
+    if (rawSpeed < 65533)
+    {
+      signalSetBus(SIG_SPEED, rawSpeed * 0.01f);
+    }
     break;
-  case 0x121: // Motor_20: MO_Fahrpedalrohwert_01 12|8 * 0.4
-    signalSetBus(SIG_PEDAL, (uint8_t)((data[1] >> 4) | (data[2] << 4)) * 0.4f);
+  }
+  case 0x121: // Motor_20: MO_Fahrpedalrohwert_01 12|8 * 0.4 (0xFF = error)
+  {
+    const uint8_t rawPedal = (uint8_t)((data[1] >> 4) | (data[2] << 4));
+    if (rawPedal != 0xFF)
+    {
+      signalSetBus(SIG_PEDAL, rawPedal * 0.4f);
+    }
     break;
-  case 0x640: // Motor_07: MO_Ansaugluft_Temp 8|8, MO_Kuehlmittel_Temp 24|8, both * 0.75 - 48
-    signalSetBus(SIG_IAT, data[1] * 0.75f - 48.0f);
-    signalSetBus(SIG_COOLANT, data[3] * 0.75f - 48.0f);
+  }
+  case 0x640: // Motor_07: MO_Ansaugluft_Temp 8|8, MO_Kuehlmittel_Temp 24|8, both * 0.75 - 48 (254 init, 255 error)
+    if (data[1] < 0xFE)
+    {
+      signalSetBus(SIG_IAT, data[1] * 0.75f - 48.0f);
+    }
+    if (data[3] < 0xFE)
+    {
+      signalSetBus(SIG_COOLANT, data[3] * 0.75f - 48.0f);
+    }
     break;
-  case 0x6B7: // Kombi_02: KBI_Inhalt_Tank 40|7 litres, KBI_Aussen_Temp_gef 56|8 * 0.5 - 50
-    signalSetBus(SIG_FUEL_LEVEL, data[5] & 0x7F);
-    signalSetBus(SIG_AMBIENT, data[7] * 0.5f - 50.0f);
+  case 0x6B7: // Kombi_02: KBI_Inhalt_Tank 40|7 litres (127 = error), KBI_Aussen_Temp_gef 56|8 * 0.5 - 50 (253 not fitted, 254 init, 255 error)
+    if ((data[5] & 0x7F) != 0x7F)
+    {
+      signalSetBus(SIG_FUEL_LITRES, data[5] & 0x7F); // litres (OBD's fuel level is a %)
+    }
+    if (data[7] < 0xFD)
+    {
+      signalSetBus(SIG_AMBIENT, data[7] * 0.5f - 50.0f);
+    }
     break;
   case 0x0AD: // Getriebe_11: GE_Fahrstufe 42|4, GE_Zielgang 60|4
   {
@@ -376,10 +408,19 @@ static void decodeVagMlb(const twai_message_t &message)
   const uint8_t *data = message.data;
   switch (message.identifier)
   {
-  case 0x105: // Motor_03: MO_Drehzahl_01 16|16 * 0.25 rpm, MO_Fahrpedalrohwert_01 48|8 * 0.4 %
-    signalSetBus(SIG_RPM, (((uint16_t)data[3] << 8) | data[2]) * 0.25f);
-    signalSetBus(SIG_PEDAL, data[6] * 0.4f);
+  case 0x105: // Motor_03: MO_Drehzahl_01 16|16 * 0.25 rpm (0xFFFF = error), MO_Fahrpedalrohwert_01 48|8 * 0.4 % (0xFF = error)
+  {
+    const uint16_t rawRpm = ((uint16_t)data[3] << 8) | data[2];
+    if (rawRpm != 0xFFFF)
+    {
+      signalSetBus(SIG_RPM, rawRpm * 0.25f);
+    }
+    if (data[6] != 0xFF)
+    {
+      signalSetBus(SIG_PEDAL, data[6] * 0.4f);
+    }
     break;
+  }
   case 0x100: // ESP_01: ESP_v_Signal 32|16 * 0.01 km/h (65533 and up = no value)
   {
     const uint16_t rawSpeed = ((uint16_t)data[5] << 8) | data[4];
@@ -389,12 +430,21 @@ static void decodeVagMlb(const twai_message_t &message)
     }
     break;
   }
-  case 0x640: // Motor_07: MO_Kuehlmittel_Temp 24|8 * 0.75 - 48 (as MQB)
-    signalSetBus(SIG_COOLANT, data[3] * 0.75f - 48.0f);
+  case 0x640: // Motor_07: MO_Kuehlmittel_Temp 24|8 * 0.75 - 48 (as MQB: 254 init, 255 error)
+    if (data[3] < 0xFE)
+    {
+      signalSetBus(SIG_COOLANT, data[3] * 0.75f - 48.0f);
+    }
     break;
   case 0x6B7: // Kombi_02: KBI_Inhalt_Tank 40|7 litres, KBI_Aussen_Temp_gef 56|8 * 0.5 - 50 (as MQB)
-    signalSetBus(SIG_FUEL_LEVEL, data[5] & 0x7F);
-    signalSetBus(SIG_AMBIENT, data[7] * 0.5f - 50.0f);
+    if ((data[5] & 0x7F) != 0x7F)
+    {
+      signalSetBus(SIG_FUEL_LITRES, data[5] & 0x7F); // litres (OBD's fuel level is a %)
+    }
+    if (data[7] < 0xFD)
+    {
+      signalSetBus(SIG_AMBIENT, data[7] * 0.5f - 50.0f);
+    }
     break;
   case 0x102: // Getriebe_03: GE_Zielgang 24|4, GE_Waehlhebel 44|4, GE_Eingangsdrehz 48|14
     setVagZielgang(data[3] & 0x0F);                       // same coding as MQB (11 = 8th gear)
@@ -429,6 +479,7 @@ static void decodeVagMlb(const twai_message_t &message)
 // frames (base + 0x00..0x08) at 50 Hz, SLOW (base + 0x10..0x22) at 10 Hz. Protocol 1.2 sends base .. +4 and +0x10 .. +0x16
 // bytes 0-3; 1.3 adds the rest (oil pressure / temperature, fuel pressure, transmission temperature ...).
 static float maxxBaro = 0.0f; // kPa, from base + 0x10 (boost = MAP - baro)
+static bool maxxIsProtocol13 = false; // a protocol 1.3 frame (base + 0x17 / + 0x20) has been heard: base + 0x16 carries oil too
 static inline float maxxInt16(const uint8_t *data, int offset)
 {
   return (float)(int16_t)(data[offset] | data[offset + 1] << 8);
@@ -436,12 +487,19 @@ static inline float maxxInt16(const uint8_t *data, int offset)
 
 static void decodeMaxx(const twai_message_t &message)
 {
-  if (message.data_length_code < 8 || message.identifier < maxxBase)
+  if (message.identifier < maxxBase)
+  {
+    return;
+  }
+  const uint16_t frameOffset = message.identifier - maxxBase; // which frame: base + 0x00, + 0x01 ...
+  // every frame is 8 bytes, except base + 0x16 on protocol 1.2, which may send only its first 4 (the gear)
+  const bool isShortGearFrame = frameOffset == 0x16 && message.data_length_code >= 2;
+  if (message.data_length_code < 8 && !isShortGearFrame)
   {
     return;
   }
   const uint8_t *data = message.data;
-  switch (message.identifier - maxxBase)
+  switch (frameOffset)
   {
   case 0x00: // RPM, throttle %, MAP kPa, lambda
   {
@@ -468,11 +526,20 @@ static void decodeMaxx(const twai_message_t &message)
   case 0x13: signalSetBus(SIG_EGT, maxxInt16(data, 6)); break;             // EGT highest C
   case 0x16:                                                               // gear; 1.3: oil pressure kPa, oil temp C
     signalSetBus(SIG_GEAR, maxxInt16(data, 0));
-    signalSetBus(SIG_OIL_PRESSURE, maxxInt16(data, 4) * 0.1f / 100.0f);
-    signalSetBus(SIG_OIL_TEMP, maxxInt16(data, 6) * 0.1f);
+    if (maxxIsProtocol13 && message.data_length_code >= 8) // 1.2 sends nothing (or padding) in bytes 4-7
+    {
+      signalSetBus(SIG_OIL_PRESSURE, maxxInt16(data, 4) * 0.1f / 100.0f);
+      signalSetBus(SIG_OIL_TEMP, maxxInt16(data, 6) * 0.1f);
+    }
     break;
-  case 0x17: signalSetBus(SIG_FUEL_PRESSURE, maxxInt16(data, 0) * 0.1f / 100.0f); break; // fuel pressure 1 kPa -> bar
-  case 0x20: signalSetBus(SIG_GEARBOX_TEMP, maxxInt16(data, 4) * 0.1f); break;           // transmission temp C
+  case 0x17: // 1.3 only: fuel pressure 1 kPa -> bar
+    maxxIsProtocol13 = true;
+    signalSetBus(SIG_FUEL_PRESSURE, maxxInt16(data, 0) * 0.1f / 100.0f);
+    break;
+  case 0x20: // 1.3 only: transmission temp C
+    maxxIsProtocol13 = true;
+    signalSetBus(SIG_GEARBOX_TEMP, maxxInt16(data, 4) * 0.1f);
+    break;
   default:
     break;
   }
@@ -820,6 +887,16 @@ bool obdDecodePid(uint8_t pid, const uint8_t *data, uint8_t len, void (*set)(sig
   }
   const ObdPidInfo info = obdPidTable[tableIndex];
   const float value = obdFormulaValue(info.formula, A, B);
+  // a chain follower never picks its own PIDs (obdSchedulePick), so it learns the pedal PID from the answers it hears:
+  // the relative pedal (0x5A) first, as the master picks it, else pedal D (0x49)
+  if (pid == 0x5A && throttlePedalPid != 0x5A)
+  {
+    throttlePedalPid = 0x5A;
+  }
+  else if (pid == 0x49 && throttlePedalPid == 0)
+  {
+    throttlePedalPid = 0x49;
+  }
   const uint8_t pedalPid = throttlePedalPid;
   // 0.37.12: on a car where the pedal feeds Throttle, the throttle valve (0x11) doesn't (a page with it still gets it)
   const bool pedalFeedsThrottle = pid == 0x11 && pedalPid != 0;
@@ -1475,6 +1552,11 @@ static void obdAnswer(uint16_t fromId, const uint8_t *payload, uint16_t length, 
     {
       obdLastMs = millis(); // 0x78 = "still working on it": keep waiting
     }
+    else if (ours && obdStep == OBD_STEP_LISTS)
+    {
+      obdStep = OBD_STEP_POLL; // a later PID list refused: poll with the lists there are (as when it doesn't come)
+      obdSendNext();
+    }
     else if (ours)
     {
       obdMiss();
@@ -1722,6 +1804,10 @@ static void processFrame(const twai_message_t &message, bool air, uint32_t now)
   CanFrameLog &entry = ring[ringHead];
   entry.id = message.identifier;
   entry.len = message.data_length_code;
+  if (entry.len > 8)
+  {
+    entry.len = 8; // a length code of 9-15 still means 8 bytes on classic CAN
+  }
   memcpy(entry.data, message.data, 8);
   entry.ms = now;
   entry.air = air;
@@ -2103,8 +2189,10 @@ bool canOnFrame(canFrameCb_t callback, bool air)
   {
     return false;
   }
-  handlerAir[handlerCount] = air;
-  handlers[handlerCount++] = callback;
+  const uint8_t slot = handlerCount;
+  handlerAir[slot] = air;
+  handlers[slot] = callback;
+  handlerCount = slot + 1; // last: the receive task only calls the handler once it is counted
   return true;
 }
 

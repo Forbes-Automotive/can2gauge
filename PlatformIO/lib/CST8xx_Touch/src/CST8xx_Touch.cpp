@@ -86,6 +86,7 @@ bool touchRead(TouchPoint &point)
   if (!touchOk)
   {
     point = lastPoint;
+    point.pressed = false; // no touch chip: never a finger held down
     return false;
   }
   uint8_t report[6];
@@ -93,6 +94,7 @@ bool touchRead(TouchPoint &point)
   {
     stats.readErrors++;
     point = lastPoint;
+    point.pressed = false; // a failed read lets go: a lost chip mid-press mustn't hold the long press for ever
     return false;
   }
   stats.reads++;

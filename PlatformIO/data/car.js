@@ -93,11 +93,19 @@ async function carDrawPicture(box, choice) {
   box.style.setProperty("--paint", carPaintHex(choice.paint));
 }
 
-// the car the form should start from: the confirmed one, else what the VIN said
+// a VIN was read that isn't My Car's (another car, or My Car left over from before): the car the gauge is in now
+function carSeenIsAnotherCar(vehicle) {
+  const car = vehicle.car || {};
+  const seen = vehicle.detected || {};
+  return !!(car.confirmed && seen.vin && seen.make && seen.vin !== car.vin);
+}
+
+// the car the form should start from: the confirmed one, else what the VIN said. 0.39.7: the VIN read wins when it's
+// another car (a Tiguan showed as the BMW saved on the bench, its VIN line above the form saying Tiguan)
 function carStartingChoice(vehicle) {
   const car = vehicle.car || {};
   const seen = vehicle.detected || {};
-  if (car.confirmed) {
+  if (car.confirmed && !carSeenIsAnotherCar(vehicle)) {
     return { vin: car.vin, makeKey: car.makeKey, make: car.make, modelCode: car.modelCode, model: car.model,
       year: car.year, body: car.body, paint: car.paint };
   }
@@ -256,7 +264,11 @@ function carFillEditor(prefix, vehicle) {
       vinLine = vinLine + "\nThe make isn't in the gauge's list: pick it below.";
     }
   }
-  if (vehicle.car && vehicle.car.confirmed === 2) {
+  if (carSeenIsAnotherCar(vehicle)) {
+    // 0.39.7: the form shows the car read; My Car stays as it is until This Is My Car is pressed
+    vinLine = vinLine + "\nNot My Car (" + [vehicle.car.make, vehicle.car.model, vehicle.car.year || ""].filter(Boolean).join(" ") +
+      "): press This Is My Car to change it.";
+  } else if (vehicle.car && vehicle.car.confirmed === 2) {
     // 0.36.2: set by itself from the first OBD scan's VIN
     vinLine = vinLine + "\nMy Car (set from the VIN): " + [vehicle.car.label, vehicle.car.year || ""].filter(Boolean).join(" ") +
       ". Change anything that's wrong and press This Is My Car.";
@@ -418,7 +430,7 @@ function carSetup() {
   const card = document.createElement("section");
   card.className = "card";
   card.dataset.sec = "device";
-  card.id = "carCard";
+  card.id = "yourCarCard"; // not carCard: that's Scan My Car's card (carscan.js)
   if (device.classList.contains("sec-hidden")) {
     card.classList.add("sec-hidden");
   }

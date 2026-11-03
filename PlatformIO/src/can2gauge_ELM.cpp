@@ -297,7 +297,11 @@ static uint8_t headerCharsFor(uint8_t protocol)
 static uint8_t parseAnswer(const char *text, ElmMsg *msgs, uint8_t max)
 {
   uint8_t count = 0;
-  uint16_t expect[4] = {0}; // ISO-TP total per message slot
+  uint16_t expect[8] = {0}; // ISO-TP total per message slot
+  if (max > 8)
+  {
+    max = 8; // never more message slots than expect[] has
+  }
   const uint8_t proto = protocolOverride ? protocolOverride : adapterStatus.protocol;
   const char *pos = text;
   while (*pos)
@@ -908,6 +912,10 @@ static bool diagPointAt(const DiagTarget &target)
   }
   if (!elmCommand(command, text, sizeof(text), 1000, false) || !containsOk(text))
   {
+    // the header is already on the module: put it back on the engine, or the OBD polling asks the module from now on
+    diagHeadersFor = target;
+    diagHeadersSet = true;
+    diagHeadersBack();
     return false;
   }
   if (target.txExt)
@@ -917,7 +925,11 @@ static bool diagPointAt(const DiagTarget &target)
     snprintf(command, sizeof(command), "ATCEA%02X", target.txExt);
     if (!elmCommand(command, text, sizeof(text), 1000, false) || !containsOk(text))
     {
-      return false; // the adapter can't do extended addressing
+      // the adapter can't do extended addressing: header and filter back on the engine, as above
+      diagHeadersFor = target;
+      diagHeadersSet = true;
+      diagHeadersBack();
+      return false;
     }
     snprintf(command, sizeof(command), "ATFCSH%03lX", (unsigned long)target.requestId);
     elmCommand(command, text, sizeof(text), 1000, false);
@@ -1041,7 +1053,16 @@ static void runDiagJob()
 {
   EXT_RAM_BSS_ATTR static char text[2048]; // a 256-byte answer is ~37 lines of hex
   const uint32_t jobNumber = diagJobNumber;
+  // the whole job copied now: if it times out while this runs, the next job's request mustn't go to this module
   const DiagTarget target = diagJobTarget;
+  uint8_t request[8];
+  memcpy(request, diagJobRequest, sizeof(request));
+  uint8_t requestLen = diagJobRequestLen;
+  if (requestLen > sizeof(request))
+  {
+    requestLen = sizeof(request);
+  }
+  const uint32_t waitMs = diagJobWaitMs;
   diagPending = false;
   diagJobOk = false;
   diagJobAnswerLen = 0;
@@ -1049,11 +1070,12 @@ static void runDiagJob()
   if (protocolIsCan(adapterStatus.protocol) && settings.elmExtraSource == ELM_EXTRA_OFF && diagPointAt(target))
   {
     char hexRequest[2 * 8 + 1];
-    for (uint8_t i = 0; i < diagJobRequestLen; i++)
+    hexRequest[0] = '\0';
+    for (uint8_t i = 0; i < requestLen; i++)
     {
-      snprintf(hexRequest + i * 2, 3, "%02X", diagJobRequest[i]);
+      snprintf(hexRequest + i * 2, 3, "%02X", request[i]);
     }
-    if (elmCommand(hexRequest, text, sizeof(text), diagJobWaitMs, false) && !strstr(text, "NO DATA"))
+    if (elmCommand(hexRequest, text, sizeof(text), waitMs, false) && !strstr(text, "NO DATA"))
     {
       uint8_t headerChars = 3;
       if (target.is29Bit)
@@ -1418,12 +1440,14 @@ static bool sessionInit()
   {
     engineAddress29Bit = response.header & 0xFF; // the last byte of 18DAF1xx = the ECU that answered (the engine)
   }
-  readSupported(response);
-  identifyVehicle();
   if (protocolIsCan(adapterStatus.protocol))
   {
-    selectEngineHeader(true); // physical engine address: only the ECU answers, no waiting on others
+    // physical engine address first: only the engine answers, so the 01 20 / 01 40 PID lists and the VIN are the
+    // engine's (asked to everyone, the gearbox's list could come back first)
+    selectEngineHeader(true);
   }
+  readSupported(response);
+  identifyVehicle();
   return true;
 }
 
@@ -1676,7 +1700,7 @@ static void pollDsgTp20()
     }
     tp20Client.drop();
     fails = 0;
-    retryAt = 0;
+    retryAt = millis(); // try now (0 would read as "later" once millis() passes 24.8 days)
   }
   if (!tp20Client.isOpen() && (int32_t)(millis() - retryAt) < 0)
   {
@@ -2683,7 +2707,8 @@ static void testTp20(uint8_t module, uint8_t group, char *result, size_t resultL
 
 // K-line through the adapter: VAG KWP2000 with a 5-baud and a fast init to the module (key bytes, ECU id 1A 9B, a few
 // block reads with timing, DTCs 18 02 FF 00, StopCommunication), then a KWP1281-style wake-up (ISO 9141 5-baud init,
-// ATSP3) to show what such a module answers - the adapter can wake it but not run the block protocol.
+// ATSP3) to show what such a module answers - the adapter can wake it but not run the block protocol - then (0.39.6)
+// OBD-II at 0x33, the address any make's engine answers OBD on.
 static void testKline(uint8_t module, uint8_t group, char *result, size_t resultLen)
 {
   EXT_RAM_BSS_ATTR static char text[512];
@@ -2833,10 +2858,55 @@ static void testKline(uint8_t module, uint8_t group, char *result, size_t result
   }
   protocolOverride = 0;
 
+  // 0.39.6: OBD-II at 0x33, any make (as First Boot and Scan My Car ask): the adapter's own OBD wake-ups on the K-line -
+  // ISO 9141-2, then KWP2000 with a 5-baud and with a fast init - each asked for its PID list (01 00). The adapter is
+  // reset and set up again after every test, so its settings can be put back to its defaults here.
+  testStep("OBD-II at 0x33: ISO 9141-2, KWP2000 5-baud, KWP2000 fast init");
+  vTaskDelay(pdMS_TO_TICKS(5200)); // let the session above lapse first (as at the start of the test)
+  elmCommand("ATD", text, sizeof(text), 2000, false); // defaults: the OBD header and the wake-up address 0x33 back
+  const char *formatCommands[] = {"ATE0", "ATL0", "ATS0", "ATH1"}; // the answer layout the gauge reads
+  for (uint8_t i = 0; i < 4; i++)
+  {
+    elmCommand(formatCommands[i], text, sizeof(text), 1000, false);
+  }
+  const char *obdProtocols[3] = {"ATSP3", "ATSP4", "ATSP5"};
+  const char *obdNames[3] = {"ISO 9141-2", "KWP2000 5-baud", "KWP2000 fast init"};
+  const uint8_t obdNumbers[3] = {3, 4, 5}; // the ATSP number of each
+  char obdText[24] = "no answer";          // the summary's "OBD 33 ...": the one that answered
+  for (uint8_t i = 0; i < 3; i++)
+  {
+    elmCommand(obdProtocols[i], text, sizeof(text), 1000, false);
+    protocolOverride = obdNumbers[i]; // parseAnswer reads the header by the protocol running
+    ElmMsg obdResponse;
+    // the answer: 41 00, then four bytes, one bit per PID 01-20 the ECU has
+    if (elmRequest("0100", obdResponse, 8000) && obdResponse.len >= 6 && obdResponse.data[0] == 0x41 &&
+        obdResponse.data[1] == 0x00)
+    {
+      uint8_t pidCount = 0;
+      for (uint8_t byteIndex = 2; byteIndex < 6; byteIndex++)
+      {
+        for (uint8_t bit = 0; bit < 8; bit++)
+        {
+          if (obdResponse.data[byteIndex] & (1 << bit))
+          {
+            pidCount++;
+          }
+        }
+      }
+      testLine("  %s: answered at 0x33 - %u of the PIDs 01-20", obdNames[i], pidCount);
+      copyStr(obdText, sizeof(obdText), obdNames[i]);
+      break;
+    }
+    testLine("  %s: no answer", obdNames[i]);
+    vTaskDelay(pdMS_TO_TICKS(3000)); // the ECU settles before the next wake-up
+  }
+  protocolOverride = 0;
+
   snprintf(result, resultLen,
-           "kline %02X: KWP2000 5-baud %s (%u/3 blocks), fast %s (%u/3), %u DTC(s); KWP1281 wake-up %s; auto-init %s", module,
-           sessionUp[0] ? "up" : "no", blocksOk[0], sessionUp[1] ? "up" : "no", blocksOk[1], dtcs, wakeText,
-           autoInit ? "reached the ECU" : "no answer");
+           "kline %02X: KWP2000 5-baud %s (%u/3 blocks), fast %s (%u/3), %u DTC(s); KWP1281 wake-up %s; auto-init %s; "
+           "OBD 33 %s",
+           module, sessionUp[0] ? "up" : "no", blocksOk[0], sessionUp[1] ? "up" : "no", blocksOk[1], dtcs, wakeText,
+           autoInit ? "reached the ECU" : "no answer", obdText);
 }
 
 // CAN broadcast source (0.22.0, settings.elmExtraSource ELM_EXTRA_CAN_MONITOR): hold the adapter in ATMA monitor and inject every CAN frame
@@ -3362,7 +3432,7 @@ static void adapterTryAgain()
 
 static void elmTaskFn(void *)
 {
-  uint32_t nextTryMs = 0;
+  uint32_t nextTryMs = millis(); // try now (0 would read as "later" once millis() passes 24.8 days)
   for (;;)
   {
     const uint32_t myGeneration = generation;
@@ -3381,14 +3451,14 @@ static void elmTaskFn(void *)
     {
       dropRequested = false; // settings changed (elmRestart): drop the link on the transport it was opened with
       adapterDisconnect();
-      nextTryMs = 0;
+      nextTryMs = millis(); // try now
       wifiBackoffMs = 0;
       adapterTryAgain(); // 0.37.1: paired, forgotten or switched: look again
     }
     if (modeWanted() && !wasModeWanted)
     {
       adapterTryAgain(); // 0.37.1: the OBD screen was just opened on the gauge: look again
-      nextTryMs = 0;
+      nextTryMs = millis(); // try now
     }
     wasModeWanted = modeWanted();
     if (scanRequested)

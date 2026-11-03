@@ -2,11 +2,16 @@
 #include <can2gauge_themes.h>
 #include <GaugeUI.h> // uiApplyTheme() when Match car picks a new theme
 
-// ---------------------------------------------------------------------------
-// the table - display order. Manufacturer rows: docs/Manufacturer themes.pdf (65 themes, 31 makes), ids 16..80 in the
-// PDF's order. The era years drive Match car; where two eras overlap the newer one wins.
-// ---------------------------------------------------------------------------
-#define NOW 9999
+// ===== Settings for this file =====
+#define NOW 9999                                         // the "to" year of an era that is still current
+#define THEME_COUNT (sizeof(themes) / sizeof(themes[0])) // rows in the theme table below
+#define LOGO_COUNT (sizeof(logos) / sizeof(logos[0]))    // rows in the boot logo table below
+
+// ===== The theme table =====
+// In display order. Manufacturer rows: docs/Manufacturer themes.pdf (65 themes, 31 makes), ids 16..80 in the PDF's
+// order. The era years drive Match car; where two eras overlap the newer one wins.
+// Each row: id, how sure the colours are, era from / to (model years), dial colour, needle colour, name, make key, era.
+// The simulator (sim/firmware.py) reads these rows straight from this file, so keep each row on one line in this form.
 static const ThemeDef themes[] = {
     // the original can2gauge palettes (full palettes in GaugeUI; accent shown here for previews)
     {THEME_TEAL, CONF_KNOWN, 0, 0, 0x24D1C4, 0x24D1C4, "can2gauge - Teal (Forbes)", NULL, "the shared Forbes Automotive palette"},
@@ -82,10 +87,11 @@ static const ThemeDef themes[] = {
     {79, CONF_KNOWN, 1975, 1999, 0xFFA63A, 0xFF7A3A, "Volvo - Amber", "volvo", "1975-1999 (240, 740, 850, S70/V70 Mk1)"},
     {80, CONF_KNOWN, 2000, NOW, 0xE8F0FF, 0xFF3B3B, "Volvo - White", "volvo", "2000+ (S60/V70 P2, S80, XC90, SPA)"},
 };
-#define THEME_COUNT (sizeof(themes) / sizeof(themes[0]))
 
-// boot logo files. Two makes share a theme with a sister brand, so the logo keys are finer than the theme keys:
-// vauxhall -> opel, citroen -> peugeot (themeKeyFor below).
+// ===== The boot logo table =====
+// Each row: the logo key (file /logos/<key>.bin) and the make's name. Two makes share a theme with a sister brand, so
+// the logo keys are finer than the theme keys: vauxhall -> opel, citroen -> peugeot (themeKeyFor below).
+// The simulator reads this table too, by its name: keep the name logos.
 static const LogoDef logos[] = {
     {"alfa", "Alfa Romeo"},
     {"aston", "Aston Martin"},
@@ -121,8 +127,256 @@ static const LogoDef logos[] = {
     {"volvo", "Volvo"},
     {"vw", "Volkswagen"},
 };
-#define LOGO_COUNT (sizeof(logos) / sizeof(logos[0]))
 
+// ===== Functions in this file =====
+static const char *themeKeyFor(const char *logoKey); // the theme key for a logo key (vauxhall -> opel, citroen -> peugeot)
+
+// ===== Theme lookups =====
+
+// how many themes there are (the web UI dropdown and the on-screen picker list them all)
+uint8_t themeCount()
+{
+  return THEME_COUNT;
+}
+
+// the theme in row index of the table (a row past the end gives the first theme)
+const ThemeDef &themeAt(uint8_t index)
+{
+  if (index >= THEME_COUNT)
+  {
+    index = 0; // past the end: the first theme
+  }
+  return themes[index];
+}
+
+// the theme with this id, or NULL when there is no such id
+const ThemeDef *themeById(uint8_t id)
+{
+  for (uint8_t i = 0; i < THEME_COUNT; i++)
+  {
+    if (themes[i].id == id)
+    {
+      return &themes[i];
+    }
+  }
+  return NULL;
+}
+
+// is this a theme id the table knows?
+bool themeValid(uint8_t id)
+{
+  return themeById(id) != NULL;
+}
+
+// the theme's name ("Volkswagen - Blue"), "?" for an unknown id
+const char *themeName(uint8_t id)
+{
+  const ThemeDef *found = themeById(id);
+  if (found == NULL)
+  {
+    return "?";
+  }
+  const ThemeDef &theme = *found; // the table row it found
+  return theme.name;
+}
+
+// the theme actually shown: Match car gives the matched theme (Custom until a VIN has been read), an unknown id gives
+// teal, any other id stays as it is
+uint8_t themeEffective(uint8_t id)
+{
+  if (id == THEME_MATCH)
+  {
+    if (themeValid(settings.themeMatched))
+    {
+      return settings.themeMatched;
+    }
+    return THEME_CUSTOM;
+  }
+  if (themeValid(id))
+  {
+    return id;
+  }
+  return THEME_TEAL;
+}
+
+// the dial and needle colours of a theme: Custom reads them from the settings, Match car is turned into its theme first
+void themeColours(uint8_t id, uint32_t &dial, uint32_t &needle)
+{
+  id = themeEffective(id);
+  if (id == THEME_CUSTOM)
+  {
+    dial = settings.themeDial;
+    needle = settings.themeNeedle;
+    return;
+  }
+  const ThemeDef &theme = *themeById(id); // always found: themeEffective only gives ids in the table
+  dial = theme.dial;
+  needle = theme.needle;
+}
+
+// ===== Match car =====
+
+// the make's era that contains the year (the newest one where two overlap), else the nearest era; year 0 = the newest
+uint8_t themeMatch(const char *makeKey, uint16_t year)
+{
+  if (!makeKey || !makeKey[0])
+  {
+    return THEME_NONE;
+  }
+  uint8_t best = THEME_NONE;  // the best theme id so far
+  int bestYearsAway = 0x7FFF; // how many years the best one's era is from the car's year
+  uint16_t bestFrom = 0;      // the year the best one's era starts
+  for (uint8_t i = 0; i < THEME_COUNT; i++)
+  {
+    const ThemeDef &theme = themes[i];
+    if (!theme.make || strcmp(theme.make, makeKey))
+    {
+      continue; // another make (or one of the can2gauge palettes)
+    }
+    int yearsAway; // 0 = the car's year is inside this era
+    if (year == 0)
+    {
+      yearsAway = 0;
+    }
+    else if (year < theme.from)
+    {
+      yearsAway = theme.from - year;
+    }
+    else if (year > theme.to)
+    {
+      yearsAway = year - theme.to;
+    }
+    else
+    {
+      yearsAway = 0;
+    }
+    if (yearsAway < bestYearsAway || (yearsAway == bestYearsAway && theme.from > bestFrom))
+    {
+      best = theme.id;
+      bestYearsAway = yearsAway;
+      bestFrom = theme.from;
+    }
+  }
+  return best;
+}
+
+// a VIN has been decoded: keep the make's theme and logo, and re-theme the gauge if it is on Match car
+void themeVehicleDetected(const char *logoKey, uint16_t year)
+{
+  const char *key = logoKey; // the make's logo key ("vw"), "" when none
+  if (key == NULL)
+  {
+    key = "";
+  }
+  const uint8_t id = themeMatch(themeKeyFor(key), year);
+  if (id == settings.themeMatched && !strcmp(settings.matchedLogo, key))
+  {
+    return; // nothing new
+  }
+  settings.themeMatched = id;
+  copyStr(settings.matchedLogo, sizeof(settings.matchedLogo), key);
+  settingsDirty = true;
+  const char *matchedText; // for the debug line
+  if (id == THEME_NONE)
+  {
+    matchedText = "no theme (Custom)";
+  }
+  else
+  {
+    matchedText = themeName(id);
+  }
+  DEBUG("theme: VIN make '%s' %u -> %s", key, year, matchedText);
+  if (settings.theme == THEME_MATCH)
+  {
+    uiApplyTheme();
+  }
+}
+
+// ===== Boot logos =====
+
+// how many boot logos there are
+uint8_t logoCount()
+{
+  return LOGO_COUNT;
+}
+
+// the logo in row index of the table (a row past the end gives the first logo)
+const LogoDef &logoAt(uint8_t index)
+{
+  if (index >= LOGO_COUNT)
+  {
+    index = 0; // past the end: the first logo
+  }
+  return logos[index];
+}
+
+// the make's name for a logo key ("vw" -> "Volkswagen"), NULL for an unknown key
+const char *logoName(const char *key)
+{
+  if (!key)
+  {
+    return NULL;
+  }
+  for (uint8_t i = 0; i < LOGO_COUNT; i++)
+  {
+    if (!strcmp(logos[i].key, key))
+    {
+      return logos[i].name;
+    }
+  }
+  return NULL;
+}
+
+// which logo boot logo option 5 shows: the make chosen in the web UI, else the VIN's make on Match car, else the make
+// of the theme in use (NULL for the can2gauge palettes and Custom)
+const char *themeLogoKey()
+{
+  if (settings.logoMake[0])
+  {
+    return settings.logoMake;
+  }
+  if (settings.theme == THEME_MATCH && settings.matchedLogo[0])
+  {
+    return settings.matchedLogo;
+  }
+  const ThemeDef *found = themeById(themeEffective(settings.theme));
+  if (found == NULL)
+  {
+    return NULL;
+  }
+  const ThemeDef &theme = *found; // the table row it found
+  return theme.make;
+}
+
+// ===== Colours from the web UI =====
+
+// "#RRGGBB" or "RRGGBB" -> 0xRRGGBB; anything else gives fallback
+uint32_t themeParseHex(const char *text, uint32_t fallback)
+{
+  if (!text)
+  {
+    return fallback;
+  }
+  if (text[0] == '#')
+  {
+    text++; // skip the #
+  }
+  if (strlen(text) != 6)
+  {
+    return fallback;
+  }
+  char *end = NULL; // where strtoul stopped reading
+  const uint32_t value = strtoul(text, &end, 16);
+  if (end != NULL && end[0] == '\0')
+  {
+    return value; // all six were hex digits
+  }
+  return fallback;
+}
+
+// ===== Detail functions =====
+
+// two makes share a theme with a sister brand: the theme key for a logo key (vauxhall -> opel, citroen -> peugeot)
 static const char *themeKeyFor(const char *logoKey)
 {
   if (!strcmp(logoKey, "vauxhall"))
@@ -134,189 +388,4 @@ static const char *themeKeyFor(const char *logoKey)
     return "peugeot";
   }
   return logoKey;
-}
-
-// ---------------------------------------------------------------------------
-// lookups
-// ---------------------------------------------------------------------------
-uint8_t themeCount()
-{
-  return THEME_COUNT;
-}
-
-const ThemeDef &themeAt(uint8_t index)
-{
-  return themes[index < THEME_COUNT ? index : 0];
-}
-
-const ThemeDef *themeById(uint8_t id)
-{
-  for (const ThemeDef &theme : themes)
-  {
-    if (theme.id == id)
-    {
-      return &theme;
-    }
-  }
-  return NULL;
-}
-
-bool themeValid(uint8_t id)
-{
-  return themeById(id) != NULL;
-}
-
-const char *themeName(uint8_t id)
-{
-  const ThemeDef *theme = themeById(id);
-  return theme ? theme->name : "?";
-}
-
-uint8_t themeEffective(uint8_t id)
-{
-  if (id == THEME_MATCH)
-  {
-    return themeValid(settings.themeMatched) ? settings.themeMatched : THEME_CUSTOM;
-  }
-  return themeValid(id) ? id : THEME_TEAL;
-}
-
-void themeColours(uint8_t id, uint32_t &dial, uint32_t &needle)
-{
-  id = themeEffective(id);
-  if (id == THEME_CUSTOM)
-  {
-    dial = settings.themeDial;
-    needle = settings.themeNeedle;
-    return;
-  }
-  const ThemeDef *theme = themeById(id);
-  dial = theme->dial;
-  needle = theme->needle;
-}
-
-// ---------------------------------------------------------------------------
-// Match car
-// ---------------------------------------------------------------------------
-// the make's era that contains the year (the newest one where two overlap), else the nearest era; year 0 = the newest
-uint8_t themeMatch(const char *makeKey, uint16_t year)
-{
-  if (!makeKey || !makeKey[0])
-  {
-    return THEME_NONE;
-  }
-  uint8_t best = THEME_NONE;
-  int bestDist = 0x7FFF;
-  uint16_t bestFrom = 0;
-  for (const ThemeDef &theme : themes)
-  {
-    if (!theme.make || strcmp(theme.make, makeKey))
-    {
-      continue;
-    }
-    int dist;
-    if (year == 0)
-    {
-      dist = 0;
-    }
-    else if (year < theme.from)
-    {
-      dist = theme.from - year;
-    }
-    else if (year > theme.to)
-    {
-      dist = year - theme.to;
-    }
-    else
-    {
-      dist = 0;
-    }
-    if (dist < bestDist || (dist == bestDist && theme.from > bestFrom))
-    {
-      best = theme.id;
-      bestDist = dist;
-      bestFrom = theme.from;
-    }
-  }
-  return best;
-}
-
-void themeVehicleDetected(const char *logoKey, uint16_t year)
-{
-  const char *key = logoKey ? logoKey : "";
-  const uint8_t id = themeMatch(themeKeyFor(key), year);
-  if (id == settings.themeMatched && !strcmp(settings.matchedLogo, key))
-  {
-    return;
-  }
-  settings.themeMatched = id;
-  copyStr(settings.matchedLogo, sizeof(settings.matchedLogo), key);
-  settingsDirty = true;
-  DEBUG("theme: VIN make '%s' %u -> %s", key, year, id == THEME_NONE ? "no theme (Custom)" : themeName(id));
-  if (settings.theme == THEME_MATCH)
-  {
-    uiApplyTheme();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// logos
-// ---------------------------------------------------------------------------
-uint8_t logoCount()
-{
-  return LOGO_COUNT;
-}
-
-const LogoDef &logoAt(uint8_t index)
-{
-  return logos[index < LOGO_COUNT ? index : 0];
-}
-
-const char *logoName(const char *key)
-{
-  if (!key)
-  {
-    return NULL;
-  }
-  for (const LogoDef &logo : logos)
-  {
-    if (!strcmp(logo.key, key))
-    {
-      return logo.name;
-    }
-  }
-  return NULL;
-}
-
-const char *themeLogoKey()
-{
-  if (settings.logoMake[0])
-  {
-    return settings.logoMake;
-  }
-  if (settings.theme == THEME_MATCH && settings.matchedLogo[0])
-  {
-    return settings.matchedLogo;
-  }
-  const ThemeDef *theme = themeById(themeEffective(settings.theme));
-  return theme ? theme->make : NULL; // NULL for the can2gauge palettes and Custom
-}
-
-uint32_t themeParseHex(const char *text, uint32_t fallback)
-{
-  if (!text)
-  {
-    return fallback;
-  }
-  if (*text == '#')
-  {
-    text++;
-  }
-  if (strlen(text) != 6)
-  {
-    return fallback;
-  }
-  char *end = NULL;
-  const uint32_t value = strtoul(text, &end, 16);
-  return (end && *end == '\0') ? value : fallback;
 }

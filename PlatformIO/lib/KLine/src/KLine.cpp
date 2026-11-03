@@ -462,7 +462,12 @@ bool kwp1281KeepAlive()
   }
   uint8_t data[KWP1281_MAX_BLOCK];
   uint8_t len;
-  return recvBlock(data, len) >= 0;
+  if (recvBlock(data, len) < 0)
+  {
+    k1281Up = false; // no answer: the session is lost
+    return false;
+  }
+  return true;
 }
 
 bool kwp1281ReadGroup(uint8_t group, Kwp1281Group &out)
@@ -1490,7 +1495,7 @@ bool kwp2000Connect(uint8_t ecuAddress, bool fastInit, uint8_t *keyBytesOut)
   return true;
 }
 
-bool kwp2000ReadPid(uint8_t pid, uint8_t *data, uint8_t &len)
+bool kwp2000ReadPid(uint8_t pid, uint8_t *data, uint8_t dataSize, uint8_t &len)
 {
   if (!k2000Up)
   {
@@ -1506,6 +1511,10 @@ bool kwp2000ReadPid(uint8_t pid, uint8_t *data, uint8_t &len)
   if (respLen < 3 || resp[0] != 0x41 || resp[1] != pid)
   {
     return false;
+  }
+  if (respLen - 2 > dataSize)
+  {
+    return false; // longer than the caller's buffer (two ECUs' answers run together)
   }
   len = respLen - 2;
   memcpy(data, resp + 2, len);

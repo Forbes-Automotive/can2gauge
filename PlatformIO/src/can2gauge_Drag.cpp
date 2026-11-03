@@ -1,41 +1,33 @@
+// Drag timer scoreboard, see can2gauge_Drag.h. The screen adds runs from the LVGL task and the web server reads and
+// clears them from its own, so every change to the board happens under boardMux, and the NVS write is done from a copy
+// afterwards.
+
 #include <can2gauge_Drag.h>
 #include <Preferences.h> // NVS: the scoreboard is kept under its own name, next to (not in) the settings
 
-// ---------------------------------------------------------------------------
-// Drag timer scoreboard (0.38.0), see can2gauge_Drag.h. The screen adds runs from the LVGL task and the web server reads
-// and clears them from its own, so every change to the board happens under boardMux, and the NVS write is done from a
-// copy afterwards.
-// ---------------------------------------------------------------------------
+// ===== Settings for this file =====
+#define DRAG_MAGIC 0xD7A6 // marks a saved board as this one
+#define DRAG_VERSION 1    // the saved board's layout (a different one starts empty)
 
-#define DRAG_MAGIC 0xD7A6  // marks a saved board as this one
-#define DRAG_VERSION 1     // the saved board's layout (a different one starts empty)
-
-// the whole board, as saved
+// the whole board, as saved: written to NVS as raw bytes, so the fields stay in this order (a new layout needs a new
+// DRAG_VERSION)
 struct DragBoard
 {
-  uint16_t magic;                            // DRAG_MAGIC
-  uint8_t version;                           // DRAG_VERSION
-  uint8_t count[DRAG_KINDS];                 // times on the board, each kind
-  uint32_t runs[DRAG_KINDS];                 // runs finished, each kind (numbers the runs)
-  DragRun best[DRAG_KINDS][DRAG_SCORES];     // fastest first
+  uint16_t magic;                        // DRAG_MAGIC
+  uint8_t version;                       // DRAG_VERSION
+  uint8_t count[DRAG_KINDS];             // times on the board, each kind
+  uint32_t runs[DRAG_KINDS];             // runs finished, each kind (numbers the runs)
+  DragRun best[DRAG_KINDS][DRAG_SCORES]; // fastest first
 };
 
+// ===== File variables (static: private to this file) =====
 static DragBoard board;                                      // the scoreboard
 static portMUX_TYPE boardMux = portMUX_INITIALIZER_UNLOCKED; // guards it (the LVGL task and the web server use it)
 
-// writes a copy of the board to NVS (called after each change, outside boardMux: NVS writes take a few ms)
-static void saveBoard()
-{
-  DragBoard copy;
-  portENTER_CRITICAL(&boardMux);
-  copy = board;
-  portEXIT_CRITICAL(&boardMux);
-  Preferences prefs; // its own Preferences, so it never closes the settings' one (can2gauge_EEP.cpp)
-  prefs.begin("c2gdrag", false);
-  prefs.putBytes("board", &copy, sizeof(copy));
-  prefs.end();
-}
+// ===== Functions in this file =====
+static void saveBoard(); // writes a copy of the board to NVS
 
+// loads the scoreboard from NVS (an empty one if nothing is saved yet, or it was saved in another layout)
 void setupDrag()
 {
   DEBUG("Setting up the drag timer...");
@@ -63,6 +55,8 @@ void setupDrag()
   DEBUG("Set up the drag timer! (%u + %u times on the board)", board.count[DRAG_KIND_KMH], board.count[DRAG_KIND_MPH]);
 }
 
+// a finished run from the screen: counted, and put in its place on the board if it is quick enough.
+// Returns its place 1..DRAG_SCORES, 0 = not on the board.
 uint8_t dragAddRun(uint8_t kind, uint32_t timeMs)
 {
   if (kind >= DRAG_KINDS)
@@ -103,6 +97,7 @@ uint8_t dragAddRun(uint8_t kind, uint32_t timeMs)
   return place;
 }
 
+// how many times are on the board for this kind
 uint8_t dragScoreCount(uint8_t kind)
 {
   if (kind >= DRAG_KINDS)
@@ -112,6 +107,7 @@ uint8_t dragScoreCount(uint8_t kind)
   return board.count[kind];
 }
 
+// one time off the board (place 0 = the best); a zero run if that place is empty
 DragRun dragScore(uint8_t kind, uint8_t place)
 {
   DragRun run;
@@ -130,6 +126,7 @@ DragRun dragScore(uint8_t kind, uint8_t place)
   return run;
 }
 
+// how many runs of this kind have been finished so far
 uint32_t dragRunCount(uint8_t kind)
 {
   if (kind >= DRAG_KINDS)
@@ -139,6 +136,7 @@ uint32_t dragRunCount(uint8_t kind)
   return board.runs[kind];
 }
 
+// empties this kind's board (the run count stays, so run numbers carry on)
 void dragClear(uint8_t kind)
 {
   if (kind >= DRAG_KINDS)
@@ -151,6 +149,7 @@ void dragClear(uint8_t kind)
   saveBoard();
 }
 
+// takes one time off the board (place 0 = the best)
 void dragDelete(uint8_t kind, uint8_t place)
 {
   if (kind >= DRAG_KINDS)
@@ -169,4 +168,17 @@ void dragDelete(uint8_t kind, uint8_t place)
   }
   portEXIT_CRITICAL(&boardMux);
   saveBoard();
+}
+
+// writes a copy of the board to NVS (called after each change, outside boardMux: NVS writes take a few ms)
+static void saveBoard()
+{
+  DragBoard copy;
+  portENTER_CRITICAL(&boardMux);
+  copy = board;
+  portEXIT_CRITICAL(&boardMux);
+  Preferences prefs; // its own Preferences, so it never closes the settings' one (can2gauge_EEP.cpp)
+  prefs.begin("c2gdrag", false);
+  prefs.putBytes("board", &copy, sizeof(copy));
+  prefs.end();
 }

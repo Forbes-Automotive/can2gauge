@@ -12,7 +12,8 @@
 // ignition comes on. Packet layout: docs/nav-link/NAV_LINK.md (version 1), mirrored in the app's NavProtocol.kt.
 //
 // The card (GaugeUI uiNavShow) comes up over whatever the glass shows: near a turn (settings.navPopupM) or for the
-// whole route, as set on the web UI's Bluetooth tab. A tap hides it until the next turn.
+// whole route, as set on the web UI's Navigation tab or the screen's menu > Navigation. A tap or a long press sends it
+// away and the gauges come back: in Pop Up until the next turn, in Route for the rest of the route.
 //
 // Bluetooth is shared with the OBD adapter link (src/can2gauge_BLE.cpp): one NimBLE stack, the gauge a central to the
 // adapter and a peripheral to the phone at the same time.
@@ -88,3 +89,8 @@ void navShowTest();              // web UI Show Test Turn: a right turn on the g
 uint32_t navPopupMetres();       // settings.navPopupM: the near-turn pop-up distance in metres
 void navBluetoothStopped();      // from bleShutdown(): the nav service went with Bluetooth, make it again next time
 bool navNeedsRestart();          // 0.37.15: switched on while Bluetooth was already running: it starts after a restart
+// the screen's own Navigation item (menu > Navigation): Off / Pop Up / Route picked there, the card sent away there
+void navSetMode(uint8_t mode);   // NAV_MODE_*: saved like a web UI change; brings back a card that was sent away
+void navDismissedOnGlass();      // the card was tapped / held away: in Route it stays away for the rest of the route
+bool navSilenced();              // Route, and the card was sent away (it comes back for the next route, or Route again)
+void navHouseTick();             // from the house task: starts / stops the phone link after a mode picked on the screen

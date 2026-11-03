@@ -7,6 +7,8 @@ void setupWebServer(); // LittleFS static files + API routes + OTA upload
 // 0.17.3: the USB bench console's way into the API: runs the handler for method ("GET" / "POST") + path with body,
 // and the reply is printed on the USB serial as "@@C2G <code> <json>". false = not a route the console can use.
 bool apiConsoleRequest(const char *method, const char *path, const String &body);
+// 0.38.7: a settings JSON (any part of it) applied as a web UI save would (a setup sent by another gauge). false = not JSON
+bool apiSettingsApply(const String &body);
 
 // 0.17.4: the filesystem's size and how much is used. LittleFS works "used" out by walking every file (9.5 MB in use:
 // over 5 s), and /api/sprites did that on the web server task at every web UI load - the K-line task on the same core

@@ -565,22 +565,25 @@ def job_steps():
 
     # ---- the mode menu: one item per screen, swipe through ---------------------------------------------------------
     J["menu"] = (1, [{"py": "warm", "args": {"pins": PIN_PULL}}, {"py": "elm_on"}, {"screen": "menu", "wait": 900},
-                     {"rec": "menu", "ms": 15500, "fps": 12, "swipeEvery": 1500}],
+                     {"rec": "menu", "ms": 22800, "fps": 12, "swipeEvery": 1500}],  # 0.39.2: 15 items (was 11)
                  lambda fr: gif(seq(fr, "menu"), "glass-menu.gif", size=340, fps=12))
 
     # ---- the mode screens behind the menu --------------------------------------------------------------------------
     ms = [{"py": "warm", "args": {"pins": PIN_PULL}}, {"py": "dbc"}, {"py": "elm_on"},
           {"py": "one_page", "args": {"cfg": PAGE_SHOTS[0][1]}}, {"wait": 6000}]
-    MODES = [("Haldex", "haldex", 1800), ("CAN bus", "mode-can", 2500), ("K-line", "mode-kline", 9000),
-             ("Bluetooth OBD", "mode-ble", 9000), ("Gearbox", "dsg", 1500), ("ADC", "mode-adc", 2500),
-             ("Output / lights", "mode-output", 1500), ("Daisy chain", "mode-chain", 1500), ("Settings", "settings", 1200)]
+    # 0.39.2: in the menu's order, with Navigation, usb2ip, Oil and Triggers (14 cells: two rows of 7)
+    MODES = [("Navigation", "mode-nav", 1500), ("CAN bus", "mode-can", 2500), ("Haldex", "haldex", 1800),
+             ("ADC", "mode-adc", 2500), ("usb2ip", "mode-ecu", 2500), ("K-line", "mode-kline", 9000),
+             ("Oil", "mode-oil", 3000), ("Gearbox", "dsg", 1500), ("Bluetooth OBD", "mode-ble", 9000),
+             ("Triggers", "mode-triggers", 1500), ("Daisy chain", "mode-chain", 1500),
+             ("Output", "mode-output", 1500), ("Settings", "settings", 1200)]
     for lab, scr, w in MODES:
         ms += [{"screen": scr, "wait": w}, {"shot": lab}]
     ms += [{"screen": "menu", "wait": 900}, {"shot": "Menu"}]
 
     def c_modes(fr):
         cells = [("Menu", fr["Menu"])] + [(lab, fr[lab]) for lab, _, _ in MODES]
-        poster(cells, 5, [("can", TEXT), ("2", ACCENT), ("gauge", TEXT), ("  on the screen", MUTED)],
+        poster(cells, 7, [("can", TEXT), ("2", ACCENT), ("gauge", TEXT), ("  on the screen", MUTED)],
                "hold for the menu - every interface has a live screen", "glass-modes.png")
     J["modes"] = (2, ms, c_modes)
 

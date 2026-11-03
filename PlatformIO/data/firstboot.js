@@ -14,7 +14,8 @@
 // ---------------------------------------------------------------------------
 let fbFound = null;          // the results, see fbEmptyResults()
 let fbRunning = false;       // a check is running (the Check again button waits)
-let fbCandidates = [];       // step 3: the pages on offer, in the driver's order: {key, picked, page, why, live}
+let fbCandidates = [];       // step 3: the pages on offer, in the driver's order: {key, picked, page, why, live, group}
+let fbTriggerCandidates = []; // 0.38.4: step 3's suggested triggers: {trigger, why, picked}
 const FB_WATCH_MS = 8000;    // how long the passive checks listen (CAN, OpenHaldex, adc2can, usb2ip, other gauges)
 const FB_KLINE_MS = 16000;   // the K-line: a 5-baud wake-up and the module's answer take a few seconds
 const FB_CHECKS_MS = 20000;  // 0.38.0: about how long all the checks take (the screen's ring creeps on over it)
@@ -42,6 +43,7 @@ function fbEmptyResults() {
     adc: { ok: false, text: "", boards: [] },
     ecu: { ok: false, text: "" },
     kline: { ok: false, text: "", ecuId: "" },
+    klineObd: { ok: false, text: "", supported: [], protocol: "", skip: false }, // 0.38.6: OBD-II on the K-line at 33
     ble: { ok: false, text: "", adapters: [], connected: false },
     obdWifi: { ok: false, text: "", networks: [] },
     chain: { ok: false, text: "", nodes: 0 },
@@ -90,6 +92,7 @@ function fbBuildTab() {
       .fb-step { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 12px; }
       .fb-step.on { color: var(--accent); border-color: var(--accent); }
       .fb-page { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--panel-2); }
+      .fb-push { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer; }
       .fb-page.off { opacity: .5; }
       .fb-page .fb-name { flex: 1 1 auto; min-width: 0; }
       .fb-page .fb-name b { display: block; font-size: 14px; }
@@ -115,11 +118,14 @@ function fbBuildTab() {
     </section>
     <section class="card" id="fbPagesCard" style="display:none">
       <h2>3. Gauges</h2>
-      <div class="help">A starter set from what was found: only gauges this car can show, all ticked. Untick or reorder any. The car is scanned as part of the checks (oil temperature, gear, boost, gearbox ...) and the best values are added here. Scan Again if the car has changed.</div>
+      <div class="help">A starter set from what was found: only gauges this car can show, from every source the gauge found (the engine, the gearbox, adc2can, usb2ip, OpenHaldex, the car's other modules), 8 ticked. Untick or reorder any. The car is scanned as part of the checks and the best values are added here. Scan Again if the car has changed.</div>
       <div class="row-inline" data-nosave="1"><button class="btn-secondary" id="fbCarScan" style="flex:0 1 200px">Scan Again</button></div>
       <div class="car-progress" id="fbCarProgress" style="display:none"><div class="car-bar"><span id="fbCarBar"></span></div><div class="help" id="fbCarProgressText"></div></div>
       <div class="mono" id="fbCarLog" style="display:none"></div>
       <div id="fbPages"></div>
+      <div class="fb-menu-title" style="margin-top:14px">Triggers</div>
+      <div class="help">Alerts on the screen when a value goes past its limit: high revs, boost, coolant, battery, and the adc2can sensors' own warning limits. Only for values this car has; untick any. Change them later on the Triggers tab.</div>
+      <div id="fbTriggers"></div>
     </section>
     <section class="card" id="fbCarCard" style="display:none">
       <h2>4. Your car</h2>
@@ -128,6 +134,10 @@ function fbBuildTab() {
     </section>
     <section class="card" id="fbApplyCard" style="display:none">
       <h2>Finish</h2>
+      <div id="fbPushBox" style="display:none" data-nosave="1">
+        <label class="fb-push"><input type="checkbox" id="fbPush" checked> <b>Set Up the Other Gauges the Same</b></label>
+        <div class="help" id="fbPushWhy"></div>
+      </div>
       <div class="row-inline">
         <button class="btn primary" id="fbApply">Apply</button>
         <button class="btn-secondary" id="fbSkip">Skip - Keep Current Settings</button>
@@ -197,6 +207,7 @@ const FB_ROWS = [ // [results key, row title]
   ["adc", "adc2can sensors"],
   ["ecu", "usb2ip (Ignitron / MaxxECU)"],
   ["kline", "K-line (VAG engine 01)"],
+  ["klineObd", "K-line OBD-II (any make, 33)"],
   ["ble", "Bluetooth OBD adapter"],
   ["obdWifi", "WiFi OBD adapter"],
   ["chain", "Other gauges (daisy chain)"],
@@ -514,6 +525,29 @@ async function fbCheckKline(busy) {
   }
   busy.kline = false;
   fbDrawChecks(busy);
+  // 0.38.6: no VW engine at 01: OBD-II on the K-line at 33, any make - the same check Scan My Car makes (one wake-up
+  // of 33 and its PID lists). Before, First Boot never asked 33, so an older car with only K-line OBD-II found nothing.
+  if (fbFound.kline.ok) {
+    fbFound.klineObd.skip = true;
+    fbFound.klineObd.text = "not needed: the engine answered at 01";
+  } else {
+    fbFound.klineObd.text = "asking OBD-II at 33 (a few seconds)...";
+    fbDrawChecks(busy);
+    carKlineObdAnswer = null; // ask again (Check Again), not the last answer
+    const obd = await carKlineObd(function () {});
+    if (obd) {
+      fbFound.klineObd.ok = true;
+      fbFound.klineObd.supported = obd.supported;
+      fbFound.klineObd.protocol = obd.protocol;
+      let protocolText = "";
+      if (obd.protocol) protocolText = " (" + obd.protocol + ")";
+      fbFound.klineObd.text = "OBD-II answered at 33" + protocolText + ": " + obd.supported.length + " PIDs";
+    } else {
+      fbFound.klineObd.text = "no OBD-II answer at 33";
+    }
+  }
+  busy.klineObd = false;
+  fbDrawChecks(busy);
 }
 
 // Bluetooth OBD: a 5 s scan (works with the adapter switched off), then what the adapter told us if one is connected
@@ -646,7 +680,23 @@ function fbRow(id, title, options, picked, why) {
   return `<tr><td>${esc(title)}</td><td><select id="${id}">${opts}</select><div class="fb-why">${esc(why)}</div></td></tr>`;
 }
 
+// 0.38.7: other gauges heard on the chain: the choice to give them this setup too (ticked)
+function fbShowPushChoice() {
+  const box = $("fbPushBox");
+  if (!box) return;
+  if (!fbFound.chain.ok) {
+    box.style.display = "none";
+    return;
+  }
+  box.style.display = "";
+  $("fbPushWhy").textContent = "The " + fbFound.chain.nodes + " other gauge(s) heard (" + fbFound.chain.text + ") get the " +
+    "same gauges, triggers and car settings, so it doesn't matter which one your phone is on. Each starts on its own " +
+    "page by its place in the row, and keeps its own WiFi, row number, name, CAN termination, OBD dongle, K-line and " +
+    "dash-light wire. They need the same firmware as this one (Daisy Chain > Update All Gauges).";
+}
+
 function fbDrawSetup() {
+  fbShowPushChoice();
   const f = fbFound;
   const s = settingsCache;
   let html = "<tr><th>Setting</th><th>Suggested</th></tr>";
@@ -700,6 +750,9 @@ function fbDrawSetup() {
   if (f.kline.ok) {
     if (kline === 0) kline = 1;
     klineWhy = "the engine answered (" + (f.kline.ecuId || "VAG module 01") + "): KWP1281 measuring blocks";
+  } else if (f.klineObd.ok) {
+    kline = 2;
+    klineWhy = "OBD-II answered on the K-line at 33: its PIDs (KWP2000 / ISO 9141-2)";
   } else {
     kline = 0;
     klineWhy = "nothing answered on the K-line";
@@ -774,13 +827,14 @@ function fbDrawSetup() {
     haldex: f.haldex.ok,
     adc: f.adc.ok,
     ecu: f.ecu.ok,
-    kline: f.kline.ok,
+    kline: f.kline.ok || f.klineObd.ok,
     oil: f.kline.ok || canFound,     // the cluster's oil sender comes over the K-line or CAN
     dsg: canFound,                   // the gearbox is read over CAN
     ble: f.ble.ok || f.obdWifi.ok,
     triggers: true,
     chain: f.chain.ok,
     output: menuOn(s.menu, "output"), // the gauge's own output: kept as it is
+    nav: menuOn(s.menu, "nav"),       // the phone's turn-by-turn: nothing on the car to find it by, so kept as it is
     drag: true,                      // 0.38.0: the drag timer, on for everyone (it was left out: Apply hid it)
   };
   $("fbMenu").innerHTML = menuItems.map(function (item) {
@@ -818,9 +872,17 @@ function fbPage(style, source, signal, label, slots) {
 function fbCarPage(pageValue, label, key, value) {
   const page = fbPage(FB_STYLE.arc, "car", key, label);
   page.signal = pageValue; // "cv:<n>" (a diagnostics slot, given at Apply), "pid:<n>" or "kl:<a>:<b>:<f>"
-  if (!fbSignal(key)) {
-    page.min = 0;
-    page.max = 100;
+  const info = fbSignal(key);
+  const valueUnit = String((value && value.unit) || "").toLowerCase();
+  const sameUnit = info && String(info.unit || "").toLowerCase() === valueUnit;
+  if (!info || (valueUnit && !sameUnit)) {
+    // 0.38.4: no gauge value of this kind, or one in another unit (a MAP in kPa, the catalogue's boost in bar): the
+    // range from the value's own unit
+    const range = carRangeFor(value || {});
+    page.min = range.min;
+    page.max = range.max;
+    page.redline = 0;
+    page.decimals = range.decimals;
   }
   return page;
 }
@@ -833,14 +895,14 @@ const FB_KLINE_KEYS = ["rpm", "coolant", "throttle", "timing", "batt", "iat"];
 
 // 0.37.13: every value key this car can give, and how: "live" (seen during the checks) or "route" (a found way in
 // always carries it: OBD-II, the K-line engine, usb2ip, or a PID Scan My Car found)
-function fbAvailableKeys() {
-  const f = fbFound;
+function fbAvailableKeys(found) {
+  const f = found;
   const keys = {};
   const addKeys = function (list, how) {
     list.forEach(function (key) { if (!keys[key]) keys[key] = how; });
   };
   addKeys(Object.keys(f.live), "live");
-  if (f.obdCan.ok || f.ble.connected) addKeys(FB_OBD_KEYS, "route");
+  if (f.obdCan.ok || f.ble.connected || f.klineObd.ok) addKeys(FB_OBD_KEYS, "route"); // 0.38.6: + OBD-II on the K-line
   if (f.kline.ok) addKeys(FB_KLINE_KEYS, "route");
   if (f.ecu.ok && typeof ECU_KEYS !== "undefined") addKeys(ECU_KEYS, "route");
   // the PIDs the scan found that feed one of the gauge's own values (oil temperature, fuel level ...)
@@ -854,136 +916,349 @@ function fbAvailableKeys() {
   return keys;
 }
 
-// 0.37.13: the starter pack - only gauges this car can actually show, all ticked (the first 8), the likely favourites
-// first. OpenHaldex only when one was heard; a value with no way in isn't offered at all. Scan My Car's values fill in
-// what the routes don't carry (oil temperature, gear, EGT ... from other modules).
+// First Boot's starter pack, from what its checks found
 function fbMakeCandidates() {
-  const f = fbFound;
-  const has = fbAvailableKeys();
+  fbCandidates = fbBuildCandidates(fbFound);
+  fbTriggerCandidates = fbBuildTriggers(fbFound); // 0.38.4: and the triggers to go with them
+}
+
+// 0.37.13: the starter pack - only gauges this car can actually show, the likely favourites first. OpenHaldex only
+// when one was heard; a value with no way in isn't offered at all. Scan My Car's values fill in what the routes don't
+// carry. 0.38.4: from any found results (First Boot's checks, or fbFoundNow for Scan My Car's Suggested Gauges), every
+// source the gauge found offered - the engine, the gearbox (DSG / ZF), adc2can, usb2ip, OpenHaldex and each other
+// module the scan found - and the 8 ticks spread over them (fbLimitList)
+function fbBuildCandidates(found) {
+  const f = found;
+  const has = fbAvailableKeys(found);
   let source = "can"; // the gauge's own values, from whichever route feeds them
   if (!f.can.ok && !f.relay.ok && f.ecu.ok) source = "ecu";
   const scanned = {}; // key -> [key, page value, label, scan value] from Scan My Car
   carSuggestions().forEach(function (row) { scanned[row[0]] = row; });
+  if (!has.boost && has.map) has.boost = has.map; // the MAP sensor gives boost too
   const list = [];
-  const add = function (key, page, why, seenLive) {
-    list.push({ key: key, page: page, why: why, live: seenLive, picked: true });
+  // group: where it comes from ("engine", "gearbox", "adc", "ecu", "haldex", "mod<n>"), for spreading the ticks
+  const add = function (key, page, why, seenLive, group) {
+    list.push({ key: key, page: page, why: why, live: seenLive, picked: true, group: group });
   };
   // one value's gauge: from the gauge's own value when a route carries it, else from Scan My Car, else not offered
-  const offer = function (key, style, label, why) {
+  const offer = function (key, style, label, why, group, pageSource) {
+    if (list.some(function (c) { return c.key === key; })) return; // offered already
     if (has[key]) {
-      add(key, fbPage(style, source, key, label), why, has[key] === "live");
+      add(key, fbPage(style, pageSource || source, key, label), why, has[key] === "live", group);
       return;
     }
     if (scanned[key]) {
       const row = scanned[key];
       const page = fbCarPage(row[1], row[2], key, row[3]);
       page.style = style;
-      add(key, page, row[3].name + " (from Scan My Car)", false);
+      const module = (carCatalog && carCatalog.modules[row[3].m]) || {};
+      add(key, page, row[3].name + " (" + (module.name || "Scan My Car") + ")", false, group);
     }
   };
 
+  // the engine's everyday gauges
+  offer("rpm", FB_STYLE.needle, "RPM", "engine speed on a needle", "engine");
+  offer("speed", FB_STYLE.bar, "SPEED", "road speed", "engine");
+  offer("oiltemp", FB_STYLE.arc, "OIL TEMP", "oil temperature", "engine");
+  offer("oilPressure", FB_STYLE.arc, "OIL PRESS", "oil pressure", "engine");
+  offer("coolant", FB_STYLE.arc, "COOLANT", "coolant temperature", "engine");
+  offer("boost", FB_STYLE.arc, "BOOST", "boost pressure", "engine");
+  offer("batt", FB_STYLE.numeric, "BATTERY", "battery voltage", "engine");
+  // OpenHaldex
   if (f.haldex.ok) {
-    add("haldex", fbPage(FB_STYLE.haldex, "can", "hdxActual", "HALDEX"), "OpenHaldex lock, target and mode", true);
+    add("haldex", fbPage(FB_STYLE.haldex, "can", "hdxActual", "HALDEX"), "OpenHaldex lock, target and mode", true, "haldex");
   }
-  offer("oiltemp", FB_STYLE.arc, "OIL TEMP", "oil temperature");
-  if (has.boost || has.map || scanned.boost) {
-    if (!has.boost && has.map) has.boost = has.map; // the MAP sensor gives boost too
-    offer("boost", FB_STYLE.arc, "BOOST", "boost pressure");
-  }
-  // the gear: the DSG / auto page when the gauge has the selector or gear itself, else the gear Scan My Car found
+  // the gearbox (DSG / ZF): the gear page when the gauge has the selector or gear itself, else the gear the scan found;
+  // its temperature and the clutch's
   if (has.gear || has.selector) {
-    add("gear", fbPage(FB_STYLE.gear, "can", "gear", "GEAR"), "selector and gear (DSG / auto)", has.gear === "live" || has.selector === "live");
+    add("gear", fbPage(FB_STYLE.gear, "can", "gear", "GEAR"), "selector and gear (DSG / auto)", has.gear === "live" || has.selector === "live", "gearbox");
   } else {
-    offer("gear", FB_STYLE.numeric, "GEAR", "current gear");
+    offer("gear", FB_STYLE.numeric, "GEAR", "current gear", "gearbox");
   }
-  offer("throttle", FB_STYLE.bar, "THROTTLE", "throttle (the pedal where the car reports it)");
-  offer("coolant", FB_STYLE.arc, "COOLANT", "coolant temperature");
-  offer("rpm", FB_STYLE.needle, "RPM", "engine speed on a needle");
-  if (f.can.kombi2 || f.kline.ok) {
-    add("oil", fbPage(FB_STYLE.oil, "can", "oiltemp", "OIL"), "the cluster's oil temp (and level on the K-line)", false);
+  offer("gboxTemp", FB_STYLE.arc, "GEARBOX", "gearbox temperature", "gearbox");
+  offer("clutchTemp", FB_STYLE.arc, "CLUTCH", "clutch temperature", "gearbox");
+  // usb2ip: what an aftermarket ECU has that a car's own doesn't
+  if (f.ecu.ok) {
+    offer("knockRetard", FB_STYLE.bar, "KNOCK", "knock retard (usb2ip)", "ecu", "ecu");
+    offer("injDuty", FB_STYLE.bar, "INJ DUTY", "injector duty (usb2ip)", "ecu", "ecu");
+    offer("ethanol", FB_STYLE.numeric, "ETHANOL", "ethanol content (usb2ip)", "ecu", "ecu");
+    offer("lambdaTarget", FB_STYLE.arc, "LAMBDA TGT", "lambda target (usb2ip)", "ecu", "ecu");
   }
-  offer("gboxTemp", FB_STYLE.arc, "GEARBOX", "gearbox temperature");
-  offer("egt", FB_STYLE.arc, "EGT", "exhaust gas temperature");
-  // four values on one page, from the ones this car has
-  const quadKeys = ["coolant", "rpm", "boost", "iat", "oiltemp", "throttle", "speed", "batt"].filter(function (k) { return has[k]; });
-  if (quadKeys.length >= 4) {
-    const quadNames = quadKeys.slice(0, 4).join(", ");
-    add("engine", fbPage(FB_STYLE.quad, source, quadKeys[0], "ENGINE", quadKeys.slice(1, 4)), "four values: " + quadNames, has[quadKeys[0]] === "live");
-  }
-  offer("iat", FB_STYLE.arc, "INTAKE", "intake air temperature");
-  offer("lambda", FB_STYLE.arc, "LAMBDA", "air / fuel ratio");
-  offer("speed", FB_STYLE.bar, "SPEED", "road speed");
-  offer("batt", FB_STYLE.numeric, "BATTERY", "battery voltage");
-  // the adc2can sensors that sent a value, by their names
+  // the adc2can sensors that sent a value, by their names, with the dial range and warning the adc2can has for them
   if (f.adc.ok && f.adc.ch) {
     f.adc.ch.forEach(function (ch, i) {
       if (ch.v === undefined && ch.value === undefined) return; // nothing wired to it
       const key = "adc" + (i + 1);
       const name = (ch.name || ("ADC " + (i + 1))).toUpperCase().slice(0, 15);
       const page = fbPage(FB_STYLE.arc, "adc", key, name);
-      add(key, page, "adc2can " + (i < 8 ? "board 1" : "board 2") + " sensor " + (i % 8 + 1) + (ch.unit ? " (" + uShown(ch.unit) + ")" : ""), true);
+      const cfg = ch.cfg || {};
+      if (cfg.dialLo !== undefined && cfg.dialHi !== undefined && cfg.dialHi > cfg.dialLo) {
+        page.min = cfg.dialLo;
+        page.max = cfg.dialHi;
+      }
+      if (cfg.highWarn !== undefined) page.redline = cfg.highWarn;
+      add(key, page, "adc2can " + (i < 8 ? "board 1" : "board 2") + " sensor " + (i % 8 + 1) + (ch.unit ? " (" + uShown(ch.unit) + ")" : ""), true, "adc");
     });
   }
+  // more from the engine
+  offer("egt", FB_STYLE.arc, "EGT", "exhaust gas temperature", "engine");
+  offer("iat", FB_STYLE.arc, "INTAKE", "intake air temperature", "engine");
+  offer("lambda", FB_STYLE.arc, "LAMBDA", "air / fuel ratio", "engine");
+  offer("throttle", FB_STYLE.bar, "THROTTLE", "throttle (the pedal where the car reports it)", "engine");
+  offer("fuelPressure", FB_STYLE.arc, "FUEL PRESS", "fuel pressure", "engine");
+  offer("turbo", FB_STYLE.arc, "TURBO", "turbo speed", "engine");
+  offer("knock", FB_STYLE.bar, "KNOCK", "knock", "engine");
+  offer("fuelLitres", FB_STYLE.bar, "FUEL", "fuel in the tank (litres)", "engine");
+  offer("ambient", FB_STYLE.numeric, "OUTSIDE", "outside temperature", "engine");
+  if (f.can.kombi2 || f.kline.ok) {
+    add("oil", fbPage(FB_STYLE.oil, "can", "oiltemp", "OIL"), "the cluster's oil temp (and level on the K-line)", false, "engine");
+  }
+  // four values on one page, from the ones this car has
+  const quadKeys = ["coolant", "rpm", "boost", "iat", "oiltemp", "throttle", "speed", "batt"].filter(function (k) { return has[k]; });
+  if (quadKeys.length >= 4) {
+    const quadNames = quadKeys.slice(0, 4).join(", ");
+    add("engine", fbPage(FB_STYLE.quad, source, quadKeys[0], "ENGINE", quadKeys.slice(1, 4)), "four values: " + quadNames, has[quadKeys[0]] === "live", "engine");
+  }
+  // the rest of the scan's picks: one from each other module it found (the AWD, the brakes ...)
+  Object.keys(scanned).forEach(function (key) {
+    if (list.some(function (c) { return c.key === key; })) return; // offered above
+    const row = scanned[key];
+    const page = fbCarPage(row[1], row[2], key, row[3]);
+    if (/\bgear\b/i.test(row[3].name) && !row[3].unit) page.style = FB_STYLE.numeric;
+    const module = (carCatalog && carCatalog.modules[row[3].m]) || {};
+    add(key, page, row[3].name + " (" + (module.name || "Scan My Car") + ")", false, "mod" + row[3].m);
+  });
   // nothing found at all (on the bench, ignition off): the everyday gauges, unticked, so Apply still has something
   if (!list.length) {
-    add("rpm", fbPage(FB_STYLE.needle, source, "rpm", "RPM"), "nothing found yet - check again with the ignition on", false);
-    add("coolant", fbPage(FB_STYLE.arc, source, "coolant", "COOLANT"), "nothing found yet", false);
-    add("boost", fbPage(FB_STYLE.arc, source, "boost", "BOOST"), "nothing found yet", false);
+    add("rpm", fbPage(FB_STYLE.needle, source, "rpm", "RPM"), "nothing found yet - check again with the ignition on", false, "engine");
+    add("coolant", fbPage(FB_STYLE.arc, source, "coolant", "COOLANT"), "nothing found yet", false, "engine");
+    add("boost", fbPage(FB_STYLE.arc, source, "boost", "BOOST"), "nothing found yet", false, "engine");
     list.forEach(function (c) { c.picked = false; });
   }
-  fbCandidates = list;
-  fbLimitPicked();
+  fbLimitList(list);
+  return list;
 }
 
-// no more than 8 ticked (the gauge has 8 page slots)
-function fbLimitPicked() {
+// no more than 8 ticked (the gauge has 8 page slots). 0.38.4: spread over the sources - first the first gauge of each
+// one found (the engine, the gearbox, adc2can, usb2ip, OpenHaldex), then the rest in the list's order
+function fbLimitList(list) {
+  const wanted = list.filter(function (c) { return c.picked; });
+  list.forEach(function (c) { c.picked = false; });
   let count = 0;
-  fbCandidates.forEach(function (c) {
-    if (c.picked) {
-      count++;
-      if (count > 8) c.picked = false;
-    }
+  const groupsTicked = {};
+  wanted.forEach(function (c) {
+    if (count >= 8 || groupsTicked[c.group] || /^mod/.test(c.group || "")) return;
+    groupsTicked[c.group] = true;
+    c.picked = true;
+    count++;
+  });
+  wanted.forEach(function (c) {
+    if (count >= 8 || c.picked) return;
+    c.picked = true;
+    count++;
   });
 }
 
-function fbDrawPages() {
+// 0.38.4: the triggers a starter set suggests, for the values this car has: [value key, label, 1 = above / 0 = below,
+// threshold, hysteresis (both in the value's own unit: C, rpm, bar, V), hold ms]. Each an alert on the screen.
+const FB_TRIGGERS = [
+  ["coolant", "COOLANT HOT", 1, 110, 5, 2000],
+  ["rpm", "RPM HIGH", 1, 6800, 300, 0],
+  ["boost", "BOOST HIGH", 1, 1.6, 0.1, 500],
+  ["batt", "BATTERY LOW", 0, 11.8, 0.4, 10000], // 10 s: starting the engine dips it for a moment
+  ["oiltemp", "OIL HOT", 1, 130, 5, 2000],
+  ["gboxTemp", "GEARBOX HOT", 1, 120, 5, 2000],
+  ["egt", "EGT HIGH", 1, 950, 25, 1000],
+  ["batt", "BATTERY HIGH", 1, 15.2, 0.3, 5000],  // a charging fault
+];
+
+// one trigger as /api/settings takes it
+function fbTrigger(key, label, above, threshold, hysteresis, holdMs) {
+  return { enabled: 1, signal: key, above: above, threshold: threshold, hysteresis: hysteresis, action: 0, output: 0,
+    latch: 0, noReading: 0, holdMs: holdMs, label: label.substring(0, 15) };
+}
+
+// 0.38.4: the suggested triggers: {trigger, why, picked}, for the values found (high revs, boost, coolant, battery ...)
+// and the adc2can sensors' own warning limits; all ticked (8 at most: the gauge has 8)
+function fbBuildTriggers(found) {
+  const has = fbAvailableKeys(found);
+  if (!has.boost && has.map) has.boost = has.map;
+  const list = [];
+  const describe = function (key, above, threshold, unit) {
+    const shown = unitShow(key, threshold, unit);
+    let word = "below";
+    if (above) word = "above";
+    return word + " " + Math.round(shown.v * 100) / 100 + " " + uShown(shown.u);
+  };
+  FB_TRIGGERS.forEach(function (row) {
+    if (!has[row[0]]) return; // this car hasn't got the value
+    const info = fbSignal(row[0]) || { unit: "" };
+    list.push({ trigger: fbTrigger(row[0], row[1], row[2], row[3], row[4], row[5]), why: describe(row[0], row[2], row[3], info.unit), picked: true });
+  });
+  if (found.adc.ok && found.adc.ch) {
+    found.adc.ch.forEach(function (ch, i) {
+      const cfg = ch.cfg || {};
+      if ((ch.v === undefined && ch.value === undefined) || (cfg.highWarn === undefined && cfg.lowWarn === undefined)) return;
+      const key = "adc" + (i + 1);
+      const name = (ch.name || ("ADC " + (i + 1))).toUpperCase();
+      if (cfg.highWarn !== undefined) {
+        const band = Math.abs(cfg.highWarn) * 0.03; // 3 %: re-arms once a little back under
+        list.push({ trigger: fbTrigger(key, name.substring(0, 10) + " HIGH", 1, cfg.highWarn, band, 1000),
+          why: "adc2can's own warning: " + describe(key, 1, cfg.highWarn, ch.unit || ""), picked: true });
+      }
+      if (cfg.lowWarn !== undefined) {
+        const band = Math.abs(cfg.lowWarn) * 0.03;
+        list.push({ trigger: fbTrigger(key, name.substring(0, 11) + " LOW", 0, cfg.lowWarn, band, 1000),
+          why: "adc2can's own warning: " + describe(key, 0, cfg.lowWarn, ch.unit || ""), picked: true });
+      }
+    });
+  }
+  list.forEach(function (c, i) { if (i >= 8) c.picked = false; });
+  return list;
+}
+
+// the trigger list, ticks only, into box
+function fbDrawTriggerList(box, candidates) {
+  if (!box) return;
+  if (!candidates.length) {
+    box.innerHTML = '<div class="help">None to suggest yet: they come with the values found (coolant, rpm, boost, battery, adc2can sensors).</div>';
+    return;
+  }
+  box.innerHTML = candidates.map(function (c, i) {
+    return `<div class="fb-page ${c.picked ? "" : "off"}">
+      <input type="checkbox" data-fbtrig="${i}" ${c.picked ? "checked" : ""}>
+      <div class="fb-name"><b>${esc(c.trigger.label)}</b><span class="fb-why">alert - ${esc(c.why)}</span></div>
+    </div>`;
+  }).join("");
+}
+
+// a tick on a trigger list (8 at most)
+function fbTriggerListClick(event, candidates, redraw) {
+  const pick = event.target.closest("[data-fbtrig]");
+  if (!pick) return;
+  const picked = candidates.filter(function (c) { return c.picked; }).length;
+  if (pick.checked && picked >= 8) {
+    pick.checked = false;
+    toast("8 triggers at most - untick one first");
+    return;
+  }
+  candidates[Number(pick.dataset.fbtrig)].picked = pick.checked;
+  redraw();
+}
+
+// the 8 trigger slots from a list on offer: the ticked ones, then the unticked switched off, then empty ones
+function fbTriggersFromList(candidates) {
+  const triggers = [];
+  candidates.filter(function (c) { return c.picked; }).concat(candidates.filter(function (c) { return !c.picked; })).slice(0, 8).forEach(function (c) {
+    const trigger = Object.assign({}, c.trigger);
+    trigger.enabled = c.picked ? 1 : 0;
+    triggers.push(trigger);
+  });
+  while (triggers.length < 8) {
+    triggers.push({ enabled: 0, signal: "none", above: 1, threshold: 0, hysteresis: 0, action: 0, output: 0, latch: 0, noReading: 0, holdMs: 0, label: "" });
+  }
+  return triggers;
+}
+
+// a list of gauges on offer, ticks and arrows, into box (First Boot's step 3, Scan My Car's Suggested Gauges)
+function fbDrawPageList(box, candidates) {
+  if (!box) return;
   const styles = catalogue.styles || [];
-  $("fbPages").innerHTML = fbCandidates.map(function (c, i) {
+  box.innerHTML = candidates.map(function (c, i) {
     const style = styles[c.page.style] || "";
     return `<div class="fb-page ${c.picked ? "" : "off"}">
       <input type="checkbox" data-fbpick="${i}" ${c.picked ? "checked" : ""}>
       <div class="fb-name"><b>${esc(c.page.label)}${c.live ? '<span class="fb-live">live</span>' : ""}</b><span class="fb-why">${esc(style)} - ${esc(c.why)}</span></div>
       <button class="btn-secondary" data-fbmove="${i}" data-dir="-1" ${i === 0 ? "disabled" : ""}>&#9650;</button>
-      <button class="btn-secondary" data-fbmove="${i}" data-dir="1" ${i === fbCandidates.length - 1 ? "disabled" : ""}>&#9660;</button>
+      <button class="btn-secondary" data-fbmove="${i}" data-dir="1" ${i === candidates.length - 1 ? "disabled" : ""}>&#9660;</button>
     </div>`;
   }).join("");
 }
 
-// ticks and arrows on the page list (one listener for the whole list)
-function fbPagesClick(event) {
+function fbDrawPages() {
+  fbDrawPageList($("fbPages"), fbCandidates);
+  fbDrawTriggerList($("fbTriggers"), fbTriggerCandidates); // 0.38.4
+}
+
+// ticks and arrows on a page list (one listener for the whole list); redraw draws the list again
+function fbPageListClick(event, candidates, redraw) {
   const pick = event.target.closest("[data-fbpick]");
   if (pick) {
-    const candidate = fbCandidates[Number(pick.dataset.fbpick)];
-    const picked = fbCandidates.filter(function (c) { return c.picked; }).length;
+    const candidate = candidates[Number(pick.dataset.fbpick)];
+    const picked = candidates.filter(function (c) { return c.picked; }).length;
     if (pick.checked && picked >= 8) {
       pick.checked = false;
       toast("8 gauges at most - untick one first");
       return;
     }
     candidate.picked = pick.checked;
-    fbDrawPages();
+    redraw();
     return;
   }
   const move = event.target.closest("[data-fbmove]");
   if (move) {
     const from = Number(move.dataset.fbmove);
     const to = from + Number(move.dataset.dir);
-    if (to < 0 || to >= fbCandidates.length) return;
-    const moving = fbCandidates[from];
-    fbCandidates[from] = fbCandidates[to];
-    fbCandidates[to] = moving;
-    fbDrawPages();
+    if (to < 0 || to >= candidates.length) return;
+    const moving = candidates[from];
+    candidates[from] = candidates[to];
+    candidates[to] = moving;
+    redraw();
   }
+}
+
+function fbPagesClick(event) {
+  fbPageListClick(event, fbCandidates, fbDrawPages);
+}
+
+// the 8 page slots from a list on offer: the ticked pages in order, then the unticked ones switched off (one tick away
+// on the Gauges tab). A Car value from the scan takes its diagnostics slot here (carscan.js carResolve).
+function fbPagesFromCandidates(candidates, spritesOn) {
+  const picked = candidates.filter(function (c) { return c.picked; });
+  const pages = [];
+  picked.concat(candidates.filter(function (c) { return !c.picked; })).slice(0, 8).forEach(function (c) {
+    const page = Object.assign({}, c.page);
+    page.enabled = c.picked ? 1 : 0;
+    page.spriteOn = spritesOn && c.picked ? 1 : 0;
+    pages.push(page);
+  });
+  while (pages.length < 8) pages.push({ enabled: 0 });
+  pages.forEach(function (page) {
+    if (page.signal) page.signal = carResolve(page.signal);
+    if (page.slots) page.slots = page.slots.map(carResolve);
+  });
+  return pages;
+}
+
+// 0.38.4: what the gauge has right now, for Scan My Car's Suggested Gauges (the same list First Boot makes): one look
+// at the live values, OpenHaldex, the adc2can boards and usb2ip, plus the way in the last scan found
+async function fbFoundNow() {
+  const found = fbEmptyResults();
+  const status = await fbGet("/api/status");
+  if (status) {
+    statusCache = status;
+    Object.keys(status.signals || {}).forEach(function (k) {
+      if (!FB_ALWAYS_THERE.includes(k)) found.live[k] = status.signals[k];
+    });
+    found.can.ok = !!(status.can && status.can.up && status.can.rxPerSec > 0);
+  }
+  const haldex = await fbGet("/api/haldex");
+  if (haldex && haldex.via) found.haldex.ok = true;
+  const adc = await fbGet("/api/adc");
+  if (adc && adc.boards && adc.boards.some(function (b) { return b.seen; })) {
+    found.adc.ok = true;
+    found.adc.boards = adc.boards;
+    found.adc.ch = adc.ch;
+  }
+  const ecu = await fbGet("/api/ecu");
+  if (ecu && ecu.heard && ecu.usb2ip) found.ecu.ok = true;
+  if (carCatalog) {
+    found.obdCan.ok = carCatalog.link === "can" && carCatalog.values.some(function (v) { return v.k === "obd"; });
+    found.ble.connected = carCatalog.link === "adapter";
+    found.kline.ok = carCatalog.modules.some(function (m) { return m.proto === "kline" && m.addr === 1; });
+    found.klineObd.ok = !!carCatalog.klineObd; // the scan found OBD-II on the K-line
+  }
+  return found;
 }
 
 // ---------------------------------------------------------------------------
@@ -999,23 +1274,12 @@ async function fbApply() {
   const picked = fbCandidates.filter(function (c) { return c.picked; });
   if (!picked.length) return toast("tick at least one gauge");
   const spritesOn = Number(fbValue("fb.sprites")) === 1;
-  // the 8 page slots: the ticked pages in order, then the unticked ones switched off (one tick away on the Gauges tab)
-  const pages = [];
-  picked.concat(fbCandidates.filter(function (c) { return !c.picked; })).slice(0, 8).forEach(function (c) {
-    const page = Object.assign({}, c.page);
-    page.enabled = c.picked ? 1 : 0;
-    page.spriteOn = spritesOn && c.picked ? 1 : 0;
-    pages.push(page);
-  });
-  while (pages.length < 8) pages.push({ enabled: 0 });
-  // 0.37.0: a Car value from the scan takes a diagnostics slot now (carscan.js)
-  pages.forEach(function (page) {
-    if (page.signal) page.signal = carResolve(page.signal);
-    if (page.slots) page.slots = page.slots.map(carResolve);
-  });
+  const pages = fbPagesFromCandidates(fbCandidates, spritesOn); // the 8 page slots, Car values in their slots
+  const triggers = fbTriggersFromList(fbTriggerCandidates);       // 0.38.4: the 8 trigger slots, the ticked ones on
 
   const body = {
     pages: pages,
+    triggers: triggers,
     can: { profile: Number(fbValue("fb.canProfile")), termination: Number(fbValue("fb.canTerm")) },
     obd: { overCan: Number(fbValue("fb.obdCan")), ecu: Number(fbValue("fb.obdEcu")) },
     oil: { source: Number(fbValue("fb.oil")) },
@@ -1036,6 +1300,9 @@ async function fbApply() {
     menu: {},
   };
   Object.assign(body, carSettingsExtra()); // 0.37.0: the slots the Car values took
+  if (body.kline.protocol === 2 && fbFound.klineObd.ok) {
+    body.kline.ecuAddr = 0; // 0.38.6: 0 = the OBD-II address 33, where it answered (no wake-up of 01 first)
+  }
   const ecuPick = fbValue("fb.ecu");
   if (ecuPick !== null) body.ecu = { wireless: Number(ecuPick) > 0 ? 1 : 0, carSignals: Number(ecuPick) === 1 ? 1 : 0 };
   // colours
@@ -1083,6 +1350,10 @@ async function fbApply() {
       const r = await fetch("/dbc/" + dbc + ".c2d");
       if (r.ok) await postDbc(await r.text());
     }
+    // 0.38.7: the other gauges in the chain set up the same (after the DBC load, so the DBC travels with it)
+    if (fbFound.chain.ok && $("fbPush") && $("fbPush").checked) {
+      await fbPushToOthers(body);
+    }
     screenSetupEnded = true; // 0.37.7: no setup update after this one (a late one would stick on the screen)
     await api("/api/firstboot", "POST", { state: "done", applied: true }); // 0.37.3: the screen says SET UP
     $("fbApplyInfo").textContent = "Done - the gauge has the new setup. Reloading the page...";
@@ -1091,6 +1362,56 @@ async function fbApply() {
   } catch (e) {
     $("fbApply").disabled = false;
     $("fbApplyInfo").textContent = "Couldn't apply: " + e.message;
+  }
+}
+
+// 0.38.7: what the other gauges get: the gauges, triggers and car settings. Each keeps its own WiFi, row number and
+// name, CAN termination, OBD dongle, K-line and dash-light wire; the theme, units, screensaver, ignition and boot logo
+// reach them as shared settings already. Their start page they work out themselves (by their place in the row).
+function fbPushBody(body) {
+  const push = { pages: body.pages, triggers: body.triggers, obd: body.obd, haldex: body.haldex, menu: body.menu };
+  if (body.can) push.can = { profile: body.can.profile };
+  if (body.ecu) push.ecu = body.ecu;
+  if (body.vdiag) push.vdiag = body.vdiag;
+  if (body.oil && Number(body.oil.source) === 0) push.oil = body.oil; // the cluster's oil on the CAN reaches every gauge
+  return push;
+}
+
+// 0.38.7: sends the setup to the other gauges (this gauge passes it on over ESP-NOW, one gauge at a time) and follows
+// the chain's progress until it's done (2 minutes at most)
+async function fbPushToOthers(body) {
+  $("fbApplyInfo").textContent = "Setting up the other gauges...";
+  fbScreen("setting up the other gauges", 97);
+  let reply = null;
+  try {
+    reply = await api("/api/chain/setup", "POST", fbPushBody(body));
+  } catch (e) {
+    reply = { error: e.message };
+  }
+  if (!reply || reply.error) {
+    $("fbApplyInfo").textContent = "This gauge is set up; the others couldn't be: " + ((reply && reply.error) || "no answer");
+    await fbSleep(5000);
+    return;
+  }
+  let seenSending = false;
+  for (let i = 0; i < 120; i++) {
+    await fbSleep(1000);
+    const chain = await fbGet("/api/chain");
+    if (!chain || !chain.update) continue;
+    const update = chain.update;
+    if (update.text) $("fbApplyInfo").textContent = update.text;
+    if (update.sending) {
+      seenSending = true;
+      continue;
+    }
+    if (seenSending || i >= 3) {
+      const lines = (update.results || []).map(function (r) { return "G" + r.node + " " + r.text; }).join(", ");
+      let resultText = "";
+      if (lines) resultText = ": " + lines;
+      $("fbApplyInfo").textContent = (update.text || "Done") + resultText;
+      await fbSleep(4000);
+      return;
+    }
   }
 }
 
@@ -1129,7 +1450,7 @@ async function fbScanCar() {
 // is there a way in to the car for the scan?
 function fbWillScan() {
   const f = fbFound;
-  return f.obdCan.ok || f.ble.connected || f.kline.ok;
+  return f.obdCan.ok || f.ble.connected || f.kline.ok || f.klineObd.ok;
 }
 
 async function fbAutoScan() {
@@ -1158,6 +1479,7 @@ async function fbAutoScan() {
 async function fbStart() {
   fbBuildTab();
   $("fbPages").addEventListener("change", fbPagesClick);
+  $("fbTriggers").addEventListener("change", function (event) { fbTriggerListClick(event, fbTriggerCandidates, fbDrawPages); });
   $("fbCarScan").addEventListener("click", fbScanCar);
   $("fbPages").addEventListener("click", function (event) { if (event.target.closest("[data-fbmove]")) fbPagesClick(event); });
   // 0.38.0: the answer index.html asked for first thing (window.fbEarlyState), so First Boot doesn't wait behind every

@@ -12,6 +12,8 @@
 #include <can2gauge_Triggers.h>
 #include <can2gauge_ADC2CAN.h>
 #include <can2gauge_Drag.h> // 0.38.0: the drag timer's best time on the menu
+#include <can2gauge_Nav.h>  // menu > Navigation: the nav link's state and mode
+#include <can2gauge_ECU.h>  // menu > usb2ip: the aftermarket ECU over WiFi
 #include <LVGL_Driver.h>
 #include <LVGL_Rotate.h> // 0.25.1: Upside Down / Rotation Trim (SCREEN_ROTATION 0 leaves it out)
 #include <GaugeUI.h>
@@ -63,7 +65,8 @@ static const char *termText()
 
 static void canInfo(char *buf, size_t len)
 {
-  static const char *profileNames[canProfile_t_MAX] = {"VAG PQ (listen)", "OBD-II PIDs", "listen only", "VAG MQB (listen)"};
+  static const char *profileNames[canProfile_t_MAX] = {"VAG PQ (listen)", "OBD-II PIDs",       "listen only",
+                                                       "VAG MQB (listen)", "MaxxECU (listen)", "Audi MLB (listen)"}; // canProfile_t order
   const CanStats &stats = canStats();
   snprintf(buf, len, "%s  %u kbps\n%s\n\nrx %lu  (%lu/s)\ntx %lu   err %lu\nbus-off %lu\n\ntermination %s\n\nrpm %d   speed %d\ncoolant %d C",
            stats.up ? "bus up" : "bus DOWN", settings.canKbps, profileNames[settings.canProfile < canProfile_t_MAX ? settings.canProfile : 2],
@@ -82,6 +85,38 @@ static void canInfo(char *buf, size_t len)
     {
       appendf(buf, len, written, "\n\nOBD: looking for the ECU");
     }
+  }
+}
+
+// a reading as the glass shows it: in the unit picked for its quantity, with that unit's decimals ("92 °C", "1.2 bar")
+static void formatSignal(signalId_t id, float value, char *buf, size_t len)
+{
+  const char *unit = "";
+  const float shown = signalDisplayValue(id, value, &unit);
+  uint8_t decimals = signalDecimals(id);
+  unitsConvertedDecimals(id, decimals); // shown in another unit (psi, °F ...): that unit's decimals instead
+  const char *unitShown = unit;
+  if (!strcmp(unit, "C"))
+  {
+    unitShown = "\xC2\xB0"
+                "C"; // the degree sign (the panel fonts have it)
+  }
+  else if (!strcmp(unit, "F"))
+  {
+    unitShown = "\xC2\xB0"
+                "F";
+  }
+  else if (!strcmp(unit, "deg"))
+  {
+    unitShown = "\xC2\xB0";
+  }
+  if (unitShown[0])
+  {
+    snprintf(buf, len, "%.*f %s", decimals, valueNoMinusZero(shown, decimals), unitShown);
+  }
+  else
+  {
+    snprintf(buf, len, "%.*f", decimals, valueNoMinusZero(shown, decimals));
   }
 }
 
@@ -136,9 +171,16 @@ static int8_t menuStatus(uint8_t item, char *buf, size_t len)
     snprintf(buf, len, "%s", runtime.klineState);
     return runtime.klineUp ? 1 : 0;
   case MENU_OUTPUT:
+  {
+    const bool hasFault = signalGet(SIG_OUT_FAULT) > 0.5f; // the IO task's debounced fault (a raw read glitches)
     snprintf(buf, len, "OUT %s • lights %s%s", ioxGet(0) ? "on" : "off", dashLightsOn() ? "on" : "off",
-             ioxFault() ? " • FAULT" : "");
-    return ioxFault() ? 0 : 1;
+             hasFault ? " • FAULT" : "");
+    if (hasFault)
+    {
+      return 0;
+    }
+    return 1;
+  }
   case MENU_DSG:
     if (signalValid(SIG_SELECTOR) && signalValid(SIG_GEAR) && signalGet(SIG_GEAR) > 0)
     {
@@ -232,6 +274,82 @@ static int8_t menuStatus(uint8_t item, char *buf, size_t len)
       snprintf(buf, len, "Off • standalone");
     }
     return settings.chainEnabled ? 1 : 0;
+  case MENU_NAV:
+  {
+    // the mode, and whether the phone is there
+    if (!navWanted())
+    {
+      snprintf(buf, len, "Off");
+      return 0;
+    }
+    NavStatus nav;
+    navStatus(nav);
+    const char *modeName = "Pop Up";
+    if (settings.navMode == NAV_MODE_WHOLE_ROUTE)
+    {
+      modeName = "Route";
+    }
+    if (nav.phoneConnected)
+    {
+      snprintf(buf, len, "%s \xE2\x80\xA2 phone connected", modeName);
+      return 1;
+    }
+    snprintf(buf, len, "%s \xE2\x80\xA2 no phone", modeName);
+    return 0;
+  }
+  case MENU_ECU:
+    if (ecuNowHeard())
+    {
+      snprintf(buf, len, "%s heard", ecuNowKindName(ecuNowKind()));
+      return 1;
+    }
+    snprintf(buf, len, "No usb2ip heard");
+    return 0;
+  case MENU_OIL:
+  {
+    if (!signalValid(SIG_OIL_TEMP))
+    {
+      snprintf(buf, len, "No oil reading");
+      return 0;
+    }
+    char temperature[16];
+    formatSignal(SIG_OIL_TEMP, signalGet(SIG_OIL_TEMP), temperature, sizeof(temperature));
+    if (signalValid(SIG_OIL_LEVEL) && signalGet(SIG_OIL_LEVEL) < 0.5f)
+    {
+      snprintf(buf, len, "%s \xE2\x80\xA2 level LOW", temperature);
+      return 0;
+    }
+    snprintf(buf, len, "%s", temperature);
+    return 1;
+  }
+  case MENU_TRIGGERS:
+  {
+    uint8_t setCount = 0;   // triggers switched on
+    uint8_t firedCount = 0; // ... of them fired now
+    for (uint8_t trigger = 0; trigger < MAX_TRIGGERS; trigger++)
+    {
+      if (settings.triggers[trigger].enabled && settings.triggers[trigger].signal != SIG_NONE)
+      {
+        setCount++;
+        if (triggerActive(trigger))
+        {
+          firedCount++;
+        }
+      }
+    }
+    if (setCount == 0)
+    {
+      snprintf(buf, len, "None set up");
+      return -1;
+    }
+    if (firedCount > 0)
+    {
+      snprintf(buf, len, "%u fired", firedCount);
+      return 0;
+    }
+    snprintf(buf, len, "%u set \xE2\x80\xA2 all clear", setCount);
+    return 1;
+  }
   default: // Settings
     snprintf(buf, len, "%s.local", settings.hostname);
     return -1;
@@ -354,7 +472,14 @@ static void klineView(UiModeView &view)
   {
     *character = (char)toupper((unsigned char)*character);
   }
-  snprintf(view.title, sizeof(view.title), "K-LINE" BULLET "%02X %s", addr, name);
+  if (browse.isObd) // 0.39.6: the engine didn't answer at 0x01, OBD-II at 0x33 did
+  {
+    copyStr(view.title, sizeof(view.title), "K-LINE" BULLET "33 OBD-II");
+  }
+  else
+  {
+    snprintf(view.title, sizeof(view.title), "K-LINE" BULLET "%02X %s", addr, name);
+  }
   copyStr(view.status, sizeof(view.status), browse.state);
   if (browse.connecting || (browse.connected && browse.searching) || (!browse.connected && fresh))
   {
@@ -370,15 +495,27 @@ static void klineView(UiModeView &view)
   }
 
   int group = browse.group + browse.step; // a swipe not yet picked up by the K-line task shows straight away
-  if (group > 255)
+  int lastGroup = 255;                    // blocks go 1..255
+  if (browse.isObd)
+  {
+    lastGroup = browse.obdPageCount; // OBD-II: the pages of PIDs
+  }
+  if (group > lastGroup)
   {
     group = 1;
   }
   else if (group < 1)
   {
-    group = 255;
+    group = lastGroup;
   }
-  snprintf(view.header, sizeof(view.header), "Block %d", group);
+  if (browse.isObd)
+  {
+    snprintf(view.header, sizeof(view.header), "Page %d / %d", group, lastGroup);
+  }
+  else
+  {
+    snprintf(view.header, sizeof(view.header), "Block %d", group);
+  }
   copyStr(view.sub, sizeof(view.sub), browse.title[0] && !browse.step && !browse.searching ? browse.title : browse.ecuId); // the label file's title
   if (!browse.searching && !browse.step && browse.text[0] != '\0')
   {
@@ -410,7 +547,14 @@ static void klineView(UiModeView &view)
     {
       snprintf(view.rowName[row], sizeof(view.rowName[row]), "%u  %s", row + 1, klineFieldKind(browse.unit[row]));
     }
-    klineFormatValue(browse.value[row], browse.unit[row], view.rowValue[row], sizeof(view.rowValue[row]));
+    if (isnan(browse.value[row]))
+    {
+      copyStr(view.rowValue[row], sizeof(view.rowValue[row]), "--"); // OBD-II: the ECU didn't answer that PID
+    }
+    else
+    {
+      klineFormatValue(browse.value[row], browse.unit[row], view.rowValue[row], sizeof(view.rowValue[row]));
+    }
   }
 }
 
@@ -728,10 +872,10 @@ static void elmView(UiModeView &view)
 static void outputView(UiModeView &view)
 {
   const bool on = ioxGet(IOX_OUT);
-  const bool fault = ioxFault();
+  const bool fault = signalGet(SIG_OUT_FAULT) > 0.5f; // the IO task's debounced fault (a raw read glitches)
   const bool lights = dashLightsOn();
   const bool night = nightActive();
-  copyStr(view.title, sizeof(view.title), "OUTPUT / ILLUMINATION");
+  copyStr(view.title, sizeof(view.title), "OUTPUT"); // short: a longer title ran off the round glass
   // the state at a glance: green = on, red = off (or a fault)
   if (fault)
   {
@@ -758,15 +902,15 @@ static void outputView(UiModeView &view)
   const char *controlText;
   if (manual == 2)
   {
-    controlText = "Auto (triggers)";
+    controlText = "Auto"; // the triggers switch it
   }
   else if (manual == 1)
   {
-    controlText = "Manual on";
+    controlText = "On";
   }
   else
   {
-    controlText = "Manual off";
+    controlText = "Off";
   }
   const char *dimmingText;
   if (settings.nightSource != 1)
@@ -781,18 +925,15 @@ static void outputView(UiModeView &view)
   {
     dimmingText = "Armed";
   }
-  const char *triggerText;
-  if (activeTrigger >= 0 && settings.triggers[activeTrigger].label[0])
-  {
-    triggerText = settings.triggers[activeTrigger].label;
-  }
-  else if (activeTrigger >= 0)
+  // which trigger has the output on: "Active" in its row (a name is too long for it), the name on the line above
+  const char *triggerText = "None";
+  if (activeTrigger >= 0)
   {
     triggerText = "Active";
-  }
-  else
-  {
-    triggerText = "None";
+    if (settings.triggers[activeTrigger].label[0])
+    {
+      snprintf(view.sub, sizeof(view.sub), "On by trigger: %s", settings.triggers[activeTrigger].label);
+    }
   }
 
   static const char *rowNames[] = {"Control", "Illumination", "Dimming", "Brightness", "Trigger"};
@@ -804,7 +945,7 @@ static void outputView(UiModeView &view)
   copyStr(view.rowName[2], sizeof(view.rowName[2]), rowNames[2]);
   copyStr(view.rowValue[2], sizeof(view.rowValue[2]), dimmingText);
   copyStr(view.rowName[3], sizeof(view.rowName[3]), rowNames[3]);
-  snprintf(view.rowValue[3], sizeof(view.rowValue[3]), night ? "%u %% night" : "%u %%", backlightTarget());
+  snprintf(view.rowValue[3], sizeof(view.rowValue[3]), "%u %%", backlightTarget()); // the Dimming row says if it's night
   copyStr(view.rowName[4], sizeof(view.rowName[4]), rowNames[4]);
   copyStr(view.rowValue[4], sizeof(view.rowValue[4]), triggerText);
 }
@@ -976,6 +1117,431 @@ static void adcView(UiModeView &view)
   }
 }
 
+// ---- Navigation: the nav link's state, and Off / Pop Up / Route as buttons (a tap or a swipe picks one) ----
+static void navView(UiModeView &view)
+{
+  NavStatus nav;
+  navStatus(nav);
+  copyStr(view.title, sizeof(view.title), "NAVIGATION");
+  if (!navWanted())
+  {
+    copyStr(view.status, sizeof(view.status), "Off - pick Pop Up or Route");
+    view.state = UI_MS_BAD;
+  }
+  else if (navNeedsRestart())
+  {
+    copyStr(view.status, sizeof(view.status), "Starts after a restart (Bluetooth was busy)");
+    view.state = UI_MS_ERR;
+  }
+  else if (!nav.started)
+  {
+    copyStr(view.status, sizeof(view.status), "Bluetooth didn't start");
+    view.state = UI_MS_ERR;
+  }
+  else if (nav.phoneConnected)
+  {
+    copyStr(view.status, sizeof(view.status), "Phone connected");
+    view.state = UI_MS_OK;
+  }
+  else
+  {
+    copyStr(view.status, sizeof(view.status), "Waiting for the phone");
+    view.state = UI_MS_BUSY;
+  }
+
+  // the three modes as buttons, the one in use lit (in NAV_MODE_* order)
+  view.choices = 3;
+  view.choiceOn = settings.navMode;
+  copyStr(view.choiceName[0], sizeof(view.choiceName[0]), "Off");
+  copyStr(view.choiceName[1], sizeof(view.choiceName[1]), "Pop Up");
+  copyStr(view.choiceName[2], sizeof(view.choiceName[2]), "Route");
+  // what the mode does
+  if (settings.navMode == NAV_MODE_NEAR_TURN)
+  {
+    snprintf(view.sub, sizeof(view.sub), "Pops up %lu m before a turn", (unsigned long)navPopupMetres());
+  }
+  else if (settings.navMode == NAV_MODE_WHOLE_ROUTE && navSilenced())
+  {
+    copyStr(view.sub, sizeof(view.sub), "Sent away: pick Route to bring it back");
+  }
+  else if (settings.navMode == NAV_MODE_WHOLE_ROUTE)
+  {
+    copyStr(view.sub, sizeof(view.sub), "Shows for the whole route");
+  }
+  else
+  {
+    copyStr(view.sub, sizeof(view.sub), "The phone link is off");
+  }
+  copyStr(view.hint, sizeof(view.hint), "Tap or swipe to change");
+
+  view.rows = 5;
+  copyStr(view.rowName[0], sizeof(view.rowName[0]), "Phone");
+  if (nav.phoneConnected)
+  {
+    copyStr(view.rowValue[0], sizeof(view.rowValue[0]), "Yes");
+  }
+  else
+  {
+    copyStr(view.rowValue[0], sizeof(view.rowValue[0]), "--");
+  }
+  copyStr(view.rowName[1], sizeof(view.rowName[1]), "Route");
+  if (nav.navigating && nav.rerouting)
+  {
+    copyStr(view.rowValue[1], sizeof(view.rowValue[1]), "Rerouting");
+  }
+  else if (nav.navigating && nav.arrived)
+  {
+    copyStr(view.rowValue[1], sizeof(view.rowValue[1]), "Arrived");
+  }
+  else if (nav.navigating)
+  {
+    copyStr(view.rowValue[1], sizeof(view.rowValue[1]), "Active");
+  }
+  else
+  {
+    copyStr(view.rowValue[1], sizeof(view.rowValue[1]), "None");
+  }
+  copyStr(view.rowName[2], sizeof(view.rowName[2]), "Next turn");
+  if (nav.navigating && nav.distText[0])
+  {
+    copyStr(view.rowValue[2], sizeof(view.rowValue[2]), nav.distText);
+  }
+  else
+  {
+    copyStr(view.rowValue[2], sizeof(view.rowValue[2]), "--");
+  }
+  copyStr(view.rowName[3], sizeof(view.rowName[3]), "Last update");
+  if (nav.ageMs != 0)
+  {
+    snprintf(view.rowValue[3], sizeof(view.rowValue[3]), "%lu s ago", (unsigned long)(nav.ageMs / 1000));
+  }
+  else
+  {
+    copyStr(view.rowValue[3], sizeof(view.rowValue[3]), "--");
+  }
+  copyStr(view.rowName[4], sizeof(view.rowName[4]), "Updates");
+  snprintf(view.rowValue[4], sizeof(view.rowValue[4]), "%lu", (unsigned long)nav.packets);
+}
+
+// ---- usb2ip: the aftermarket ECU over WiFi. The first page is the link, the next ones its everyday values ----
+static uint8_t ecuPage = 0;
+static volatile int8_t ecuStep = 0;
+EXT_RAM_BSS_ATTR static EcuNowView ecuState; // its state (a few hundred bytes): kept off the screen task's stack
+
+static void ecuView(UiModeView &view)
+{
+  ecuNowView(ecuState);
+  copyStr(view.title, sizeof(view.title), "USB2IP");
+  // the everyday values it sends, for the pages after the first
+  uint8_t valueList[ECUN_VALUES];
+  uint8_t valueCount = 0;
+  for (uint8_t valueIndex = 0; valueIndex < ECUN_VALUES; valueIndex++)
+  {
+    if (!isnan(ecuState.value[valueIndex]) && ecuNowValueSignal(valueIndex) != SIG_NONE)
+    {
+      valueList[valueCount] = valueIndex;
+      valueCount++;
+    }
+  }
+  const uint8_t pageCount = 1 + (valueCount + UI_MODE_ROWS - 1) / UI_MODE_ROWS; // the link page, then the values
+  const int8_t step = ecuStep;
+  ecuStep = 0;
+  ecuPage = (uint8_t)((ecuPage + pageCount + step) % pageCount);
+
+  if (!settings.ecuWireless)
+  {
+    copyStr(view.status, sizeof(view.status), "Off (web UI usb2ip tab)");
+    view.state = UI_MS_ERR;
+  }
+  else if (ecuState.heard)
+  {
+    snprintf(view.status, sizeof(view.status), "Heard" BULLET "%d dBm", ecuState.rssi);
+    view.state = UI_MS_OK;
+  }
+  else if (ecuState.everHeard)
+  {
+    snprintf(view.status, sizeof(view.status), "Not heard for %lu s", (unsigned long)(ecuState.ageMs / 1000));
+    view.state = UI_MS_BAD;
+  }
+  else
+  {
+    copyStr(view.status, sizeof(view.status), "Looking for usb2ip (WiFi)");
+    view.state = UI_MS_BUSY;
+  }
+  if (ecuState.everHeard)
+  {
+    copyStr(view.header, sizeof(view.header), ecuNowKindName(ecuState.kind));
+  }
+  else
+  {
+    copyStr(view.header, sizeof(view.header), "Not connected");
+  }
+  if (ecuState.libraryMismatch)
+  {
+    copyStr(view.sub, sizeof(view.sub), "Update can2gauge or usb2ip (lists differ)");
+  }
+  else if (ecuState.ecu[0])
+  {
+    copyStr(view.sub, sizeof(view.sub), ecuState.ecu);
+  }
+  else
+  {
+    copyStr(view.sub, sizeof(view.sub), ecuState.source);
+  }
+  if (pageCount > 1)
+  {
+    snprintf(view.hint, sizeof(view.hint), "%u of %u", ecuPage + 1, pageCount);
+  }
+
+  if (ecuPage == 0)
+  {
+    // the link
+    view.rows = 5;
+    copyStr(view.rowName[0], sizeof(view.rowName[0]), "Reading the ECU");
+    if (ecuState.live && ecuState.fromPc)
+    {
+      copyStr(view.rowValue[0], sizeof(view.rowValue[0]), "Via PC");
+    }
+    else if (ecuState.live)
+    {
+      copyStr(view.rowValue[0], sizeof(view.rowValue[0]), "Yes");
+    }
+    else
+    {
+      copyStr(view.rowValue[0], sizeof(view.rowValue[0]), "No");
+    }
+    copyStr(view.rowName[1], sizeof(view.rowName[1]), "Channels");
+    snprintf(view.rowValue[1], sizeof(view.rowValue[1]), "%u / %u", ecuState.rowsReceiving, ecuState.rowsTotal);
+    copyStr(view.rowName[2], sizeof(view.rowName[2]), "Packets");
+    snprintf(view.rowValue[2], sizeof(view.rowValue[2]), "%lu", (unsigned long)ecuState.packets);
+    copyStr(view.rowName[3], sizeof(view.rowName[3]), "Lost");
+    snprintf(view.rowValue[3], sizeof(view.rowValue[3]), "%lu", (unsigned long)ecuState.lost);
+    copyStr(view.rowName[4], sizeof(view.rowName[4]), "usb2ip firmware");
+    if (ecuState.everHeard)
+    {
+      snprintf(view.rowValue[4], sizeof(view.rowValue[4]), "%u.%u", ecuState.fwMajor, ecuState.fwMinor);
+    }
+    else
+    {
+      copyStr(view.rowValue[4], sizeof(view.rowValue[4]), "--");
+    }
+    return;
+  }
+  // its everyday values, five to a page
+  for (uint8_t listIndex = (ecuPage - 1) * UI_MODE_ROWS; listIndex < valueCount && view.rows < UI_MODE_ROWS; listIndex++)
+  {
+    const uint8_t valueIndex = valueList[listIndex];
+    const signalId_t id = ecuNowValueSignal(valueIndex);
+    copyStr(view.rowName[view.rows], sizeof(view.rowName[0]), signalName(id));
+    formatSignal(id, ecuState.value[valueIndex], view.rowValue[view.rows], sizeof(view.rowValue[0]));
+    view.rows++;
+  }
+}
+
+// ---- Oil: the cluster's oil temperature and level (CAN Kombi_2, or the K-line session to the cluster) ----
+static void oilView(UiModeView &view)
+{
+  const OilStatus &oil = runtime.oil;
+  copyStr(view.title, sizeof(view.title), "OIL");
+  if (settings.oilSource == OIL_SRC_KLINE)
+  {
+    runtime.oilPageSeenMs = millis() | 1; // on screen: opens (and keeps) the K-line session to the cluster, as the oil page does
+    if (oil.connected)
+    {
+      copyStr(view.status, sizeof(view.status), "Cluster connected");
+      view.state = UI_MS_OK;
+    }
+    else if (oil.connecting)
+    {
+      copyStr(view.status, sizeof(view.status), oil.state);
+      view.state = UI_MS_BUSY;
+    }
+    else if (oil.state[0])
+    {
+      copyStr(view.status, sizeof(view.status), oil.state);
+      view.state = UI_MS_BAD;
+    }
+    else
+    {
+      copyStr(view.status, sizeof(view.status), "Cluster not connected");
+      view.state = UI_MS_BAD;
+    }
+  }
+  else
+  {
+    const bool isHeard = oil.kombi2Ms != 0 && millis() - oil.kombi2Ms < 2000; // Kombi_2 comes several times a second
+    if (isHeard)
+    {
+      copyStr(view.status, sizeof(view.status), "Kombi_2 (0x420) heard");
+      view.state = UI_MS_OK;
+    }
+    else
+    {
+      copyStr(view.status, sizeof(view.status), "No Kombi_2 (0x420) on the CAN");
+      view.state = UI_MS_BAD;
+    }
+  }
+
+  // the temperature big, the level under it
+  char temperature[20] = "--";
+  if (signalValid(SIG_OIL_TEMP))
+  {
+    formatSignal(SIG_OIL_TEMP, signalGet(SIG_OIL_TEMP), temperature, sizeof(temperature));
+  }
+  copyStr(view.header, sizeof(view.header), temperature);
+  const char *levelText = "--";
+  if (signalValid(SIG_OIL_LEVEL) && signalGet(SIG_OIL_LEVEL) > 0.5f)
+  {
+    levelText = "OK";
+  }
+  else if (signalValid(SIG_OIL_LEVEL))
+  {
+    levelText = "LOW";
+    view.headerTone = 2; // red: top it up
+  }
+  if (signalValid(SIG_OIL_LEVEL))
+  {
+    snprintf(view.sub, sizeof(view.sub), "Level %s", levelText);
+  }
+  else
+  {
+    copyStr(view.sub, sizeof(view.sub), "No level reading");
+  }
+
+  view.rows = 5;
+  copyStr(view.rowName[0], sizeof(view.rowName[0]), "Source");
+  if (settings.oilSource == OIL_SRC_KLINE)
+  {
+    copyStr(view.rowValue[0], sizeof(view.rowValue[0]), "K-line");
+  }
+  else
+  {
+    copyStr(view.rowValue[0], sizeof(view.rowValue[0]), "CAN");
+  }
+  copyStr(view.rowName[1], sizeof(view.rowName[1]), "Temperature");
+  copyStr(view.rowValue[1], sizeof(view.rowValue[1]), temperature);
+  copyStr(view.rowName[2], sizeof(view.rowName[2]), "Level");
+  copyStr(view.rowValue[2], sizeof(view.rowValue[2]), levelText);
+  copyStr(view.rowName[3], sizeof(view.rowName[3]), "Oil pressure");
+  if (signalValid(SIG_OIL_PRESSURE))
+  {
+    formatSignal(SIG_OIL_PRESSURE, signalGet(SIG_OIL_PRESSURE), view.rowValue[3], sizeof(view.rowValue[3]));
+  }
+  else
+  {
+    copyStr(view.rowValue[3], sizeof(view.rowValue[3]), "--");
+  }
+  if (settings.oilSource == OIL_SRC_KLINE)
+  {
+    copyStr(view.rowName[4], sizeof(view.rowName[4]), "Reads / errors");
+    snprintf(view.rowValue[4], sizeof(view.rowValue[4]), "%lu / %lu", (unsigned long)oil.reads, (unsigned long)oil.errors);
+  }
+  else
+  {
+    copyStr(view.rowName[4], sizeof(view.rowName[4]), "Frames");
+    snprintf(view.rowValue[4], sizeof(view.rowValue[4]), "%lu", (unsigned long)oil.kombi2Count);
+  }
+}
+
+// ---- Triggers: each switched-on trigger, fired or not, five to a page ----
+static uint8_t triggerPage = 0;
+static volatile int8_t triggerStep = 0;
+
+static void triggersView(UiModeView &view)
+{
+  copyStr(view.title, sizeof(view.title), "TRIGGERS");
+  uint8_t triggerList[MAX_TRIGGERS]; // the switched-on ones
+  uint8_t triggerCount = 0;
+  uint8_t firedCount = 0;
+  int8_t firstFired = -1;
+  for (uint8_t trigger = 0; trigger < MAX_TRIGGERS; trigger++)
+  {
+    if (!settings.triggers[trigger].enabled || settings.triggers[trigger].signal == SIG_NONE)
+    {
+      continue;
+    }
+    triggerList[triggerCount] = trigger;
+    triggerCount++;
+    if (triggerActive(trigger))
+    {
+      firedCount++;
+      if (firstFired < 0)
+      {
+        firstFired = trigger;
+      }
+    }
+  }
+  if (triggerCount == 0)
+  {
+    copyStr(view.status, sizeof(view.status), "None set up");
+    view.state = UI_MS_BAD;
+    copyStr(view.header, sizeof(view.header), "No Triggers");
+    copyStr(view.sub, sizeof(view.sub), "Set them up in the web UI's Triggers tab");
+    return;
+  }
+  const uint8_t pageCount = (triggerCount + UI_MODE_ROWS - 1) / UI_MODE_ROWS;
+  const int8_t step = triggerStep;
+  triggerStep = 0;
+  triggerPage = (uint8_t)((triggerPage + pageCount + step) % pageCount);
+
+  if (firedCount > 0)
+  {
+    snprintf(view.status, sizeof(view.status), "%u fired", firedCount);
+    view.state = UI_MS_ERR;
+    snprintf(view.header, sizeof(view.header), "%u Fired", firedCount);
+    view.headerTone = 2; // red
+    if (settings.triggers[firstFired].label[0])
+    {
+      copyStr(view.sub, sizeof(view.sub), settings.triggers[firstFired].label);
+    }
+    else
+    {
+      copyStr(view.sub, sizeof(view.sub), signalName((signalId_t)settings.triggers[firstFired].signal));
+    }
+  }
+  else
+  {
+    snprintf(view.status, sizeof(view.status), "Watching %u", triggerCount);
+    view.state = UI_MS_OK;
+    copyStr(view.header, sizeof(view.header), "All Clear");
+    view.headerTone = 1; // green
+    copyStr(view.sub, sizeof(view.sub), "Limits are set in the web UI");
+  }
+  if (pageCount > 1)
+  {
+    snprintf(view.hint, sizeof(view.hint), "%u of %u", triggerPage + 1, pageCount);
+  }
+
+  // each one: its name, then FIRED or what it reads now
+  for (uint8_t listIndex = triggerPage * UI_MODE_ROWS; listIndex < triggerCount && view.rows < UI_MODE_ROWS; listIndex++)
+  {
+    const uint8_t trigger = triggerList[listIndex];
+    const TriggerCfg &config = settings.triggers[trigger];
+    const signalId_t id = (signalId_t)config.signal;
+    if (config.label[0])
+    {
+      copyStr(view.rowName[view.rows], sizeof(view.rowName[0]), config.label);
+    }
+    else
+    {
+      copyStr(view.rowName[view.rows], sizeof(view.rowName[0]), signalName(id));
+    }
+    if (triggerActive(trigger))
+    {
+      copyStr(view.rowValue[view.rows], sizeof(view.rowValue[0]), "FIRED");
+    }
+    else if (signalValid(id))
+    {
+      formatSignal(id, signalGet(id), view.rowValue[view.rows], sizeof(view.rowValue[0]));
+    }
+    else
+    {
+      copyStr(view.rowValue[view.rows], sizeof(view.rowValue[0]), "--");
+    }
+    view.rows++;
+  }
+}
+
 // the last view drawn on the glass, for the web UI's Live Data (displayLiveView)
 EXT_RAM_BSS_ATTR static UiModeView liveView;
 static uint8_t liveItem = 0;
@@ -992,6 +1558,10 @@ static void modeView(uint8_t item, UiModeView &view)
   case MENU_OUTPUT: outputView(view); break;
   case MENU_CHAIN: chainView(view); break;
   case MENU_ADC: adcView(view); break;
+  case MENU_NAV: navView(view); break;
+  case MENU_ECU: ecuView(view); break;
+  case MENU_OIL: oilView(view); break;
+  case MENU_TRIGGERS: triggersView(view); break;
   default: break;
   }
   portENTER_CRITICAL(&liveMux);
@@ -1027,8 +1597,40 @@ static void onModeSwipe(uint8_t item, int8_t direction)
   case MENU_CAN: canStep = direction; break;
   case MENU_BLE: obdStep = direction; break;
   case MENU_ADC: adcStep = direction; break;
+  case MENU_ECU: ecuStep = direction; break;
+  case MENU_TRIGGERS: triggerStep = direction; break;
+  case MENU_NAV:
+  {
+    // a swipe steps through Off / Pop Up / Route, rolling over at the ends (past Route back to Off, before Off to Route)
+    int mode = settings.navMode + direction;
+    if (mode < NAV_MODE_OFF)
+    {
+      mode = NAV_MODE_WHOLE_ROUTE;
+    }
+    if (mode > NAV_MODE_WHOLE_ROUTE)
+    {
+      mode = NAV_MODE_OFF;
+    }
+    navSetMode((uint8_t)mode);
+    break;
+  }
   default: break;
   }
+}
+
+// an option button tapped on a mode screen: menu > Navigation's Off / Pop Up / Route (in NAV_MODE_* order)
+static void onModeChoice(uint8_t item, uint8_t choice)
+{
+  if (item == MENU_NAV)
+  {
+    navSetMode(choice);
+  }
+}
+
+// the nav card was tapped or held away on the glass
+static void onNavDismissed()
+{
+  navDismissedOnGlass();
 }
 
 static bool onHaldexMode(uint8_t mode)
@@ -1173,7 +1775,8 @@ void setupDisplay()
   }
 #endif
 
-  UiCallbacks callbacks = {onBrightness, onCanTermination, onUnits, onReboot, onSettingsChanged, onPageChanged, onModeSwipe, onHaldexMode};
+  UiCallbacks callbacks = {onBrightness, onCanTermination, onUnits,      onReboot,      onSettingsChanged,
+                           onPageChanged, onModeSwipe,     onHaldexMode, onModeChoice, onNavDismissed};
   uiInit(callbacks);
   DEBUG("gauge pages built at %lu ms", millis());
   uiSetInfoProvider(UI_INFO_HALDEX, haldexInfo);

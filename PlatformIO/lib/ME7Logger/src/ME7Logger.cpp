@@ -539,7 +539,7 @@ static bool trySession(uint8_t mode, uint32_t speed, bool &baudTaken)
   if (speed != 10400)
   {
     uint8_t request[3] = {0x10, mode, me7BaudByte(speed)};
-    if (kwp2000Request(request, 3, response, responseLen, 500))
+    if (kwp2000Request(request, 3, response, responseLen, 500, sizeof(response)))
     {
       baudTaken = true;
       return true;
@@ -547,7 +547,7 @@ static bool trySession(uint8_t mode, uint32_t speed, bool &baudTaken)
   }
   // no baud change (or the ECU refused it): the plain two-byte session request
   uint8_t plainRequest[2] = {0x10, mode};
-  return kwp2000Request(plainRequest, 2, response, responseLen, 500);
+  return kwp2000Request(plainRequest, 2, response, responseLen, 500, sizeof(response));
 }
 
 static bool sessionSetup(char *err, size_t errLen)
@@ -794,7 +794,7 @@ static bool defineBlocks(char *err, size_t errLen)
       // DynamicallyDefineLocalIdentifier by memory address: [2C][id][03][position][size][addrH][addrM][addrL]
       uint8_t request[8] = {0x2C, lid, 0x03, position, size, (uint8_t)(address >> 16), (uint8_t)(address >> 8),
                             (uint8_t)address};
-      if (!kwp2000Request(request, 8, response, responseLen, 300))
+      if (!kwp2000Request(request, 8, response, responseLen, 300, sizeof(response)))
       {
         if (entriesHere == 0)
         {

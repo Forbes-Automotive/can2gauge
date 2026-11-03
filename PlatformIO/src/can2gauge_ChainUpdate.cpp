@@ -11,6 +11,10 @@
 #include <esp_image_format.h> // esp_image_get_metadata(): how long our firmware is
 #include <esp_random.h>
 #include <esp_heap_caps.h> // heap_caps_get_free_size(): the internal RAM numbers in the log if the task can't be made
+#include <can2gauge_API.h>       // 0.38.7: apiSettingsApply() - a setup from another gauge applied as a web UI save
+#include <can2gauge_CanMon.h>    // canDbcSlotPath(), canDbcLoadAll(): the car's DBCs travel with a setup
+#include <can2gauge_FirstBoot.h> // firstBootSetState(): a gauge set up by another one doesn't ask again
+#include <FirstBootPrompt.h>     // uiFirstBootHide(): its "Set this gauge up?" card off the screen
 #include "mbedtls/md.h"
 #include "mbedtls/sha256.h"
 
@@ -25,6 +29,8 @@
 //   FILE_DONE  all sent.                                 answer: OK once the file checks out and is in place
 //   FINISH     switch to the new firmware and restart (only if anything changed)
 //   ABORT      give up: the receiver throws away what it has so far
+//   PLEASE     (0.39.5, from a gauge with older firmware to the newest one) start the job above, to every gauge.
+//              Signed. answer: OK = starting, or why not (busy, driving ...)
 // The web files go before the restart, so a gauge never starts the new firmware with the old web page.
 // ---------------------------------------------------------------------------
 
@@ -38,6 +44,15 @@
 #define UPD_MAX_FILES 400 // most files in one release (163 in 0.25.0)
 #define UPD_TARGET_TIMEOUT_MS 20000 // receiver: nothing heard from the sender this long = the job is dropped
 #define UPD_RESTART_WAIT_MS 90000   // sender: how long to wait for an updated gauge to come back after its restart
+#define UPD_FILE_TRIES 3            // sender: a file that arrives with the wrong fingerprint is sent this many times in all
+#define UPD_SETUP_FILE CHAIN_SETUP_FILE // a setup job's settings (POST /api/chain/setup writes it, FINISH applies it)
+#define UPD_SETUP_MAX_FILES 8       // files in a setup job: the settings, the car scan, the DBC slots
+
+// what sending one file came to (sendOneFile)
+#define FILE_SEND_FAILED 0    // no answer, or a refusal: the gauge's update has failed (failText says why)
+#define FILE_SEND_SAME 1      // the other gauge has it already
+#define FILE_SEND_OK 2        // sent, checked and in place
+#define FILE_SEND_BAD_PRINT 3 // it all arrived but its fingerprint didn't match: worth sending again
 
 // packet types: requests (gauge sending the update -> gauge being updated)
 #define UPD_HELLO 1
@@ -48,6 +63,10 @@
 #define UPD_FILE_DONE 6
 #define UPD_FINISH 7
 #define UPD_ABORT 8
+#define UPD_SETUP 9 // 0.38.7: HELLO for a setup job (First Boot's "Set Up the Other Gauges the Same"): files, then FINISH
+                    // applies the settings file - no firmware, no restart
+#define UPD_PLEASE 10 // 0.39.5: Update All Gauges pressed on a gauge with older firmware: it asks the gauge with the
+                      // newest firmware to update the others (the asking gauge too). Signed with the chain key.
 // ... and the answer to every one of them
 #define UPD_REPLY 20
 
@@ -64,6 +83,7 @@
 #define UPD_WRITE_FAILED 9 // flash / file write failed
 #define UPD_BAD_IMAGE 10   // it all arrived but the fingerprint didn't match
 #define UPD_CHAIN_OFF 11   // the chain is off on that gauge
+#define UPD_OTHER_VERSION 12 // SETUP: it runs other firmware (settings only travel between gauges on the same version)
 
 // packed: these go over the air byte for byte, so the compiler mustn't add padding between the fields
 struct __attribute__((packed)) UpdHeader
@@ -106,6 +126,12 @@ struct __attribute__((packed)) UpdFile
   uint8_t hmac[UPD_HMAC_LEN]; // key code over everything before it
 };
 
+struct __attribute__((packed)) UpdPlease // 0.39.5: "please update the gauges" (the header says who asks)
+{
+  UpdHeader header;
+  uint8_t hmac[UPD_HMAC_LEN]; // key code over the header
+};
+
 struct __attribute__((packed)) UpdReply
 {
   UpdHeader header;
@@ -134,7 +160,12 @@ struct UpdTarget
 // ---------------------------------------------------------------------------
 static QueueHandle_t packetQueue = NULL;  // packets from the WiFi task to the update task
 static volatile bool taskRunning = false; // the update task exists (0.25.3: made once at boot and kept)
-static volatile bool sendRequested = false; // web UI pressed "Update Other Gauges"
+static volatile bool sendRequested = false; // web UI pressed "Update All Gauges"
+static volatile bool setupRequested = false; // 0.38.7: First Boot asked to set the other gauges up the same
+static volatile bool pleaseRequested = false; // 0.39.5: Update All Gauges here, but another gauge has newer firmware:
+                                              // the update task asks it to do the job (askNewestGauge)
+static UpdTarget newestGauge;                 // ... that gauge
+static uint8_t newestVersion[3];              // ... and its firmware version
 static volatile bool stopRequested = false; // web UI pressed "Stop"
 static volatile bool sending = false;       // this gauge is updating the others
 static volatile bool receiving = false;     // this gauge is being updated
@@ -173,6 +204,7 @@ static mbedtls_sha256_context fileSha; // fingerprint of what has arrived so far
 static uint16_t fileIndex = 0;      // for the progress ring
 static uint16_t fileCount = 0;
 static bool anythingChanged = false; // a file was replaced (restart at FINISH even with the same firmware)
+static bool isSetupJob = false;      // 0.38.7: the job is another gauge's setup (FINISH applies it, no restart)
 static int lastPercentShown = -1;
 
 // sender
@@ -421,7 +453,14 @@ static void showReceiveProgress()
   lastPercentShown = percent;
   char detail[40];
   snprintf(detail, sizeof(detail), "from G%u - keep it powered", senderNode);
-  uiProgress("UPDATING", detail, percent);
+  if (isSetupJob)
+  {
+    uiProgress("SETTING UP", detail, percent); // another gauge's First Boot setup
+  }
+  else
+  {
+    uiProgress("UPDATING", detail, percent);
+  }
   setStatusPercent((uint8_t)percent);
 }
 
@@ -446,7 +485,14 @@ static void dropTargetJob(const char *why)
   if (receiving && why != NULL)
   {
     DEBUG("CHAIN UPDATE: dropped - %s", why);
-    uiProgress("UPDATE STOPPED", why, 0, true, 5000);
+    if (isSetupJob)
+    {
+      uiProgress("SETUP STOPPED", why, 0, true, 5000);
+    }
+    else
+    {
+      uiProgress("UPDATE STOPPED", why, 0, true, 5000);
+    }
     setStatusText(why);
   }
   if (receiving)
@@ -455,6 +501,7 @@ static void dropTargetJob(const char *why)
   }
   firmwareReady = false;
   receiving = false;
+  isSetupJob = false;
   targetSession = 0;
   haveLastReply = false;
 }
@@ -490,9 +537,12 @@ static void handleHello(const UpdPacket &packet)
     sendReply(packet.mac, hello.header, UPD_BAD_KEY, ourVersionNumber);
     return;
   }
-  if (receiving && millis() - lastPacketMs < UPD_TARGET_TIMEOUT_MS)
+  // already being updated by another gauge. The same gauge starting again (its last job failed and the ABORT was lost)
+  // takes over straight away: the old job is dropped below
+  const bool isSameSender = memcmp(packet.mac, senderMac, 6) == 0;
+  if (receiving && !isSameSender && millis() - lastPacketMs < UPD_TARGET_TIMEOUT_MS)
   {
-    sendReply(packet.mac, hello.header, UPD_BUSY, ourVersionNumber); // already being updated by another job
+    sendReply(packet.mac, hello.header, UPD_BUSY, ourVersionNumber);
     return;
   }
   if (sending || otaInProgress())
@@ -510,6 +560,12 @@ static void handleHello(const UpdPacket &packet)
     sendReply(packet.mac, hello.header, UPD_DRIVING, ourVersionNumber);
     return;
   }
+  const bool setupJob = hello.header.type == UPD_SETUP; // 0.38.7: another gauge's setup, not an update
+  if (setupJob && versionNumber(hello.version) != ourVersionNumber)
+  {
+    sendReply(packet.mac, hello.header, UPD_OTHER_VERSION, ourVersionNumber); // settings only between equal firmware
+    return;
+  }
   if (versionNumber(hello.version) < ourVersionNumber)
   {
     sendReply(packet.mac, hello.header, UPD_NEWER, ourVersionNumber); // never go back to older firmware this way
@@ -523,6 +579,23 @@ static void handleHello(const UpdPacket &packet)
   targetSession = hello.header.session;
   lastPacketMs = millis();
   receiving = true;
+  if (setupJob)
+  {
+    // a setup: a few small files, then FINISH applies them. No firmware, no slower screen clock.
+    isSetupJob = true;
+    firmwareNeeded = false;
+    fileIndex = 0;
+    fileCount = hello.fileCount;
+    anythingChanged = false;
+    lastPercentShown = -1;
+    char setupText[80];
+    snprintf(setupText, sizeof(setupText), "Being set up the same as G%u", senderNode);
+    setStatusText(setupText);
+    DEBUG("CHAIN UPDATE: G%u is setting us up the same (%u files)", senderNode, fileCount);
+    showReceiveProgress();
+    sendReply(packet.mac, hello.header, UPD_OK, ourVersionNumber);
+    return;
+  }
   displaySetUpdateClock(true); // 0.36.9: slower screen clock while flash is written (no lines on the screen)
   DEBUG("CHAIN UPDATE: screen clock slowed for the update");
   firmwareLength = hello.imageLength;
@@ -804,10 +877,25 @@ static void handleFileDone(const UpdPacket &packet)
 }
 
 // FINISH: switch to the new firmware and restart (or just say "up to date")
+static void applyPushedSetup(); // below: a setup job's settings applied
+
 static void handleFinish(const UpdPacket &packet)
 {
   UpdHeader header;
   memcpy(&header, packet.data, sizeof(header));
+  if (isSetupJob)
+  {
+    // 0.38.7: a setup - answer first (no restart), then apply it: the settings take a moment to apply. The answer
+    // twice: a repeat of FINISH would find the job closed already
+    sendReply(packet.mac, header, UPD_OK, 0);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    linkEspNowSendTo(packet.mac, &lastReply, sizeof(lastReply));
+    receiving = false;
+    isSetupJob = false;
+    targetSession = 0;
+    applyPushedSetup();
+    return;
+  }
   if (firmwareReady && esp_ota_set_boot_partition(otaPartition) != ESP_OK)
   {
     sendReply(packet.mac, header, UPD_WRITE_FAILED, 0);
@@ -840,6 +928,39 @@ static void handleFinish(const UpdPacket &packet)
 }
 
 // one packet for the gauge being updated
+// 0.39.5: a gauge with older firmware asks this one (the newest in the chain) to update the gauges, it included: as if
+// Update All Gauges were pressed here. Answered OK, or why not.
+static void handlePlease(const UpdPacket &packet)
+{
+  if (packet.length < sizeof(UpdPlease))
+  {
+    return;
+  }
+  UpdPlease please;
+  memcpy(&please, packet.data, sizeof(please));
+  uint8_t expected[UPD_HMAC_LEN];
+  keyCode(packet.data, offsetof(UpdPlease, hmac), expected);
+  if (memcmp(expected, please.hmac, UPD_HMAC_LEN) != 0)
+  {
+    sendReply(packet.mac, please.header, UPD_BAD_KEY, 0);
+    return;
+  }
+  String reason;
+  if (chainUpdateStart(reason))
+  {
+    DEBUG("CHAIN UPDATE: G%u asked us (the newest firmware) to update the gauges", please.header.node);
+    sendReply(packet.mac, please.header, UPD_OK, 0);
+    return;
+  }
+  uint8_t code = UPD_BUSY; // already updating, or can't start here
+  if (carIsMoving())
+  {
+    code = UPD_DRIVING;
+  }
+  DEBUG("CHAIN UPDATE: G%u asked us to update the gauges - %s", please.header.node, reason.c_str());
+  sendReply(packet.mac, please.header, code, 0);
+}
+
 static void handleAsTarget(const UpdPacket &packet)
 {
   UpdHeader header;
@@ -852,7 +973,12 @@ static void handleAsTarget(const UpdPacket &packet)
   {
     return; // a late answer for a job we were sending
   }
-  if (header.type == UPD_HELLO)
+  if (header.type == UPD_PLEASE) // 0.39.5: another gauge asks this one to update the gauges
+  {
+    handlePlease(packet);
+    return;
+  }
+  if (header.type == UPD_HELLO || header.type == UPD_SETUP) // 0.38.7: + a setup job's hello
   {
     handleHello(packet);
     return;
@@ -970,6 +1096,8 @@ static const char *replyText(uint8_t code)
     return "firmware didn't check out";
   case UPD_CHAIN_OFF:
     return "chain is off on it";
+  case UPD_OTHER_VERSION:
+    return "runs other firmware - Update All Gauges first, then set it up";
   default:
     return "error";
   }
@@ -1016,6 +1144,69 @@ static bool loadFileList()
   return true;
 }
 
+static bool sendStream(const UpdTarget &target, uint8_t type, uint32_t totalLength, File &file, const char *what,
+                       String &failText); // below
+
+// one web file to the other gauge, once: FILE (it says SAME or SEND), the pieces, FILE_DONE. Returns FILE_SEND_...
+static uint8_t sendOneFile(const UpdTarget &target, uint16_t i, String &failText)
+{
+  UpdReply reply;
+  UpdFile filePacket;
+  memset(&filePacket, 0, sizeof(filePacket));
+  fillUpdHeader(filePacket.header, UPD_FILE, sendSession, nextRequest());
+  filePacket.index = i;
+  filePacket.count = pathCount;
+  filePacket.size = fileSizes[i];
+  memcpy(filePacket.hash, hashAt(i), 32);
+  copyStr(filePacket.path, UPD_PATH_LEN, pathAt(i));
+  keyCode((const uint8_t *)&filePacket, offsetof(UpdFile, hmac), filePacket.hmac);
+  // it fingerprints its own copy first: up to a few s for the biggest file
+  if (!askTarget(target, (uint8_t *)&filePacket, sizeof(filePacket), 10000, 3, reply))
+  {
+    failText = "no answer while checking files";
+    return FILE_SEND_FAILED;
+  }
+  if (reply.status == UPD_SAME)
+  {
+    return FILE_SEND_SAME;
+  }
+  if (reply.status != UPD_SEND)
+  {
+    failText = replyText(reply.status);
+    return FILE_SEND_FAILED;
+  }
+  File file = LittleFS.open(pathAt(i), "r");
+  if (!file)
+  {
+    failText = String("couldn't read ") + pathAt(i);
+    return FILE_SEND_FAILED;
+  }
+  const bool sent = sendStream(target, UPD_FILE_DATA, fileSizes[i], file, "files", failText);
+  file.close();
+  if (!sent)
+  {
+    return FILE_SEND_FAILED;
+  }
+  UpdHeader done;
+  fillUpdHeader(done, UPD_FILE_DONE, sendSession, nextRequest());
+  if (!askTarget(target, (uint8_t *)&done, sizeof(done), 5000, 3, reply))
+  {
+    failText = "no answer after a file";
+    return FILE_SEND_FAILED;
+  }
+  if (reply.status == UPD_BAD_IMAGE)
+  {
+    failText = String(pathAt(i)) + ": " + replyText(reply.status);
+    return FILE_SEND_BAD_PRINT; // the other gauge threw that copy away: it can be sent again
+  }
+  if (reply.status != UPD_OK)
+  {
+    failText = String(pathAt(i)) + ": " + replyText(reply.status);
+    return FILE_SEND_FAILED;
+  }
+  return FILE_SEND_OK;
+}
+
 // send a whole stream piece by piece, following the offsets the other gauge asks for.
 // type UPD_FW_DATA = from our running firmware slot, UPD_FILE_DATA = from the open file
 static bool sendStream(const UpdTarget &target, uint8_t type, uint32_t totalLength, File &file, const char *what,
@@ -1031,14 +1222,25 @@ static bool sendStream(const UpdTarget &target, uint8_t type, uint32_t totalLeng
     {
       pieceLength = UPD_CHUNK;
     }
-    if (type == UPD_FW_DATA)
+    // the piece from our own flash, checked: a short or failed read is tried once more, then the job stops (before,
+    // an unchecked short read went out as it was and only showed as a wrong fingerprint at the other end)
+    bool hasPiece = false;
+    for (uint8_t readTry = 0; readTry < 2 && !hasPiece; readTry++)
     {
-      esp_partition_read(runningPartition, offset, dataPacket.bytes, pieceLength);
+      if (type == UPD_FW_DATA)
+      {
+        hasPiece = esp_partition_read(runningPartition, offset, dataPacket.bytes, pieceLength) == ESP_OK;
+      }
+      else
+      {
+        file.seek(offset);
+        hasPiece = file.read(dataPacket.bytes, pieceLength) == pieceLength;
+      }
     }
-    else
+    if (!hasPiece)
     {
-      file.seek(offset);
-      file.read(dataPacket.bytes, pieceLength);
+      failText = String("couldn't read our own ") + what;
+      return false;
     }
     fillUpdHeader(dataPacket.header, type, sendSession, nextRequest());
     dataPacket.offset = offset;
@@ -1075,6 +1277,8 @@ static bool sendStream(const UpdTarget &target, uint8_t type, uint32_t totalLeng
 }
 
 // update one gauge. True = updated (or already up to date). failText = why not.
+static bool sendFileList(const UpdTarget &target, String &failText, uint16_t &filesSent); // below
+
 static bool updateOneGauge(const UpdTarget &target, bool haveFiles, bool &restarting, String &failText)
 {
   restarting = false;
@@ -1133,64 +1337,9 @@ static bool updateOneGauge(const UpdTarget &target, bool haveFiles, bool &restar
 
   // web UI files
   uint16_t filesSent = 0;
-  if (haveFiles)
+  if (haveFiles && !sendFileList(target, failText, filesSent))
   {
-    for (uint16_t i = 0; i < pathCount; i++)
-    {
-      snprintf(text, sizeof(text), "G%u %s: files %u of %u (%u sent)", target.node, target.name, i + 1, pathCount,
-               filesSent);
-      setStatusText(text);
-      setStatusPercent((uint8_t)((i + 1) * 100 / pathCount));
-      UpdFile filePacket;
-      memset(&filePacket, 0, sizeof(filePacket));
-      fillUpdHeader(filePacket.header, UPD_FILE, sendSession, nextRequest());
-      filePacket.index = i;
-      filePacket.count = pathCount;
-      filePacket.size = fileSizes[i];
-      memcpy(filePacket.hash, hashAt(i), 32);
-      copyStr(filePacket.path, UPD_PATH_LEN, pathAt(i));
-      keyCode((const uint8_t *)&filePacket, offsetof(UpdFile, hmac), filePacket.hmac);
-      // it fingerprints its own copy first: up to a few s for the biggest file
-      if (!askTarget(target, (uint8_t *)&filePacket, sizeof(filePacket), 10000, 3, reply))
-      {
-        failText = "no answer while checking files";
-        return false;
-      }
-      if (reply.status == UPD_SAME)
-      {
-        continue;
-      }
-      if (reply.status != UPD_SEND)
-      {
-        failText = replyText(reply.status);
-        return false;
-      }
-      File file = LittleFS.open(pathAt(i), "r");
-      if (!file)
-      {
-        failText = String("couldn't read ") + pathAt(i);
-        return false;
-      }
-      const bool sent = sendStream(target, UPD_FILE_DATA, fileSizes[i], file, "files", failText);
-      file.close();
-      if (!sent)
-      {
-        return false;
-      }
-      UpdHeader done;
-      fillUpdHeader(done, UPD_FILE_DONE, sendSession, nextRequest());
-      if (!askTarget(target, (uint8_t *)&done, sizeof(done), 5000, 3, reply))
-      {
-        failText = "no answer after a file";
-        return false;
-      }
-      if (reply.status != UPD_OK)
-      {
-        failText = String(pathAt(i)) + ": " + replyText(reply.status);
-        return false;
-      }
-      filesSent++;
-    }
+    return false;
   }
 
   // FINISH
@@ -1202,6 +1351,80 @@ static bool updateOneGauge(const UpdTarget &target, bool haveFiles, bool &restar
     return false;
   }
   restarting = reply.value != 0;
+  return true;
+}
+
+// every file in the lists (pathAt / fileSizes / hashAt) to the other gauge, each sent again if it arrives wrong.
+// filesSent: how many it needed. false = the job failed (failText says why)
+static bool sendFileList(const UpdTarget &target, String &failText, uint16_t &filesSent)
+{
+  char text[80];
+  filesSent = 0;
+  for (uint16_t i = 0; i < pathCount; i++)
+  {
+    snprintf(text, sizeof(text), "G%u %s: files %u of %u (%u sent)", target.node, target.name, i + 1, pathCount,
+             filesSent);
+    setStatusText(text);
+    setStatusPercent((uint8_t)((i + 1) * 100 / pathCount));
+    // a file that arrives with the wrong fingerprint is sent again (UPD_FILE_TRIES in all), instead of the whole
+    // gauge failing and the other gauge throwing away the firmware it has already checked
+    uint8_t result = sendOneFile(target, i, failText);
+    for (uint8_t attempt = 2; attempt <= UPD_FILE_TRIES && result == FILE_SEND_BAD_PRINT; attempt++)
+    {
+      DEBUG("CHAIN UPDATE: G%u %s arrived wrong - sending it again (try %u of %u)", target.node, pathAt(i), attempt,
+            UPD_FILE_TRIES);
+      result = sendOneFile(target, i, failText);
+    }
+    if (result == FILE_SEND_FAILED || result == FILE_SEND_BAD_PRINT)
+    {
+      return false; // failText says why
+    }
+    if (result == FILE_SEND_OK)
+    {
+      filesSent++;
+    }
+  }
+  return true;
+}
+
+// 0.38.7: one gauge set up the same as this one: a setup HELLO, the files, FINISH (it applies them, no restart)
+static bool setupOneGauge(const UpdTarget &target, String &failText)
+{
+  sendSession = (uint16_t)(esp_random() & 0xFFFF);
+  if (sendSession == 0)
+  {
+    sendSession = 1; // 0 means "no job" on the other side
+  }
+  UpdHello hello;
+  memset(&hello, 0, sizeof(hello));
+  fillUpdHeader(hello.header, UPD_SETUP, sendSession, nextRequest());
+  hello.board = chainUpdateBoardId();
+  chainUpdateVersion(hello.version);
+  hello.fileCount = pathCount; // imageLength and appHash stay 0: no firmware in a setup
+  keyCode((const uint8_t *)&hello, offsetof(UpdHello, hmac), hello.hmac);
+  UpdReply reply;
+  if (!askTarget(target, (uint8_t *)&hello, sizeof(hello), 8000, 3, reply))
+  {
+    failText = "no answer (chain on, same group, 0.38.7 or later?)";
+    return false;
+  }
+  if (reply.status != UPD_OK)
+  {
+    failText = replyText(reply.status);
+    return false;
+  }
+  uint16_t filesSent = 0;
+  if (!sendFileList(target, failText, filesSent))
+  {
+    return false;
+  }
+  UpdHeader finish;
+  fillUpdHeader(finish, UPD_FINISH, sendSession, nextRequest());
+  if (!askTarget(target, (uint8_t *)&finish, sizeof(finish), 5000, 3, reply) || reply.status != UPD_OK)
+  {
+    failText = "no answer at the end";
+    return false;
+  }
   return true;
 }
 
@@ -1267,6 +1490,130 @@ static void addResult(uint8_t node, bool finished, bool worked, const char *text
 }
 
 // the whole job: every other gauge that can take a chain update, one at a time
+// every gauge heard over ESP-NOW that can take a chain update (each listed in the results as "waiting")
+static uint8_t listTargets(UpdTarget *targets, uint8_t maxTargets)
+{
+  uint8_t targetCount = 0;
+  LinkNode nodes[16];
+  const uint8_t count = linkNodes(nodes, 16);
+  for (uint8_t i = 0; i < count && targetCount < maxTargets; i++)
+  {
+    LinkNode node = nodes[i];
+    const bool heardOnEspNow = (node.via & 2) != 0; // bit 1 = heard on ESP-NOW
+    if (!heardOnEspNow)
+    {
+      addResult(node.node, true, false, "only heard on CAN - chain updates go over ESP-NOW");
+      continue;
+    }
+    if (node.updateProto < 1)
+    {
+      addResult(node.node, true, false, "older than 0.25.0 - update it from its own page");
+      continue;
+    }
+    targets[targetCount].node = node.node;
+    memcpy(targets[targetCount].mac, node.mac, 6);
+    copyStr(targets[targetCount].name, NAME_LEN, node.name);
+    addResult(node.node, false, false, "waiting");
+    targetCount++;
+  }
+  return targetCount;
+}
+
+// a file into the setup job's list, when this gauge has it: its size and fingerprint
+static void addSetupFile(const char *path)
+{
+  if (pathCount >= UPD_SETUP_MAX_FILES || !LittleFS.exists(path))
+  {
+    return;
+  }
+  uint32_t size = 0; // hashFile fills it in
+  if (hashFile(path, hashAt(pathCount), size))
+  {
+    copyStr(pathAt(pathCount), UPD_PATH_LEN, path);
+    fileSizes[pathCount] = size;
+    pathCount++;
+  }
+}
+
+// 0.38.7: First Boot's "Set Up the Other Gauges the Same": the settings it wrote (UPD_SETUP_FILE), the car scan and the
+// car's DBCs to every other gauge, one at a time
+static void runSetupJob()
+{
+  sending = true;
+  stopRequested = false;
+  portENTER_CRITICAL(&statusMux);
+  status.resultCount = 0;
+  status.percent = 0;
+  portEXIT_CRITICAL(&statusMux);
+  setStatusText("Setting up the other gauges the same");
+  filePaths = (char *)ps_malloc(UPD_SETUP_MAX_FILES * UPD_PATH_LEN);
+  fileHashes = (uint8_t *)ps_malloc(UPD_SETUP_MAX_FILES * 32);
+  fileSizes = (uint32_t *)ps_malloc(UPD_SETUP_MAX_FILES * sizeof(uint32_t));
+  pathCount = 0;
+  bool ready = filePaths != NULL && fileHashes != NULL && fileSizes != NULL;
+  if (ready)
+  {
+    addSetupFile(UPD_SETUP_FILE);
+    ready = pathCount == 1; // the settings themselves must be there
+    addSetupFile("/car/values.json"); // the car scan: the Car values on its own Gauges tab
+    for (uint8_t slot = 0; slot < 3; slot++)
+    {
+      addSetupFile(canDbcSlotPath(slot)); // the car's DBCs (slots 0-2): the CAN values the pages read
+    }
+  }
+  if (!ready)
+  {
+    setStatusText("Couldn't read the setup to send");
+  }
+  UpdTarget targets[16];
+  uint8_t targetCount = 0;
+  if (ready)
+  {
+    targetCount = listTargets(targets, 16);
+    if (targetCount == 0)
+    {
+      setStatusText("No other gauges to set up");
+    }
+  }
+  uint8_t setUpCount = 0;
+  for (uint8_t i = 0; i < targetCount && !stopRequested; i++)
+  {
+    const UpdTarget target = targets[i];
+    char text[80];
+    snprintf(text, sizeof(text), "G%u %s: setting up", target.node, target.name);
+    setStatusText(text);
+    setStatusPercent(0);
+    addResult(target.node, false, false, "setting up");
+    String failText;
+    if (setupOneGauge(target, failText))
+    {
+      addResult(target.node, true, true, "set up the same");
+      setUpCount++;
+    }
+    else
+    {
+      sendAbort(target);
+      DEBUG("CHAIN UPDATE: setting up G%u failed - %s", target.node, failText.c_str());
+      addResult(target.node, true, false, failText.c_str());
+    }
+  }
+  if (targetCount > 0)
+  {
+    char text[80];
+    snprintf(text, sizeof(text), "Set up %u of %u other gauges", setUpCount, targetCount);
+    setStatusText(text);
+  }
+  free(filePaths);
+  free(fileHashes);
+  free(fileSizes);
+  filePaths = NULL;
+  fileHashes = NULL;
+  fileSizes = NULL;
+  pathCount = 0;
+  sending = false;
+  stopRequested = false;
+}
+
 static void runSendJob()
 {
   sending = true;
@@ -1320,28 +1667,7 @@ static void runSendJob()
   uint8_t targetCount = 0;
   if (ready)
   {
-    LinkNode nodes[16];
-    const uint8_t count = linkNodes(nodes, 16);
-    for (uint8_t i = 0; i < count; i++)
-    {
-      LinkNode node = nodes[i];
-      const bool heardOnEspNow = (node.via & 2) != 0; // bit 1 = heard on ESP-NOW
-      if (!heardOnEspNow)
-      {
-        addResult(node.node, true, false, "only heard on CAN - chain updates go over ESP-NOW");
-        continue;
-      }
-      if (node.updateProto < 1)
-      {
-        addResult(node.node, true, false, "older than 0.25.0 - update it from its own page");
-        continue;
-      }
-      targets[targetCount].node = node.node;
-      memcpy(targets[targetCount].mac, node.mac, 6);
-      copyStr(targets[targetCount].name, NAME_LEN, node.name);
-      addResult(node.node, false, false, "waiting");
-      targetCount++;
-    }
+    targetCount = listTargets(targets, 16);
   }
   if (ready && targetCount == 0)
   {
@@ -1417,6 +1743,81 @@ static void runSendJob()
 }
 
 // ---------------------------------------------------------------------------
+// 0.39.5: Update All Gauges from any gauge - the newest firmware in the chain is the one passed on
+// ---------------------------------------------------------------------------
+// The gauge with the newest firmware, when that's newer than this gauge's: heard over ESP-NOW, on the same board, able
+// to run a chain update. On a tie, the lowest node number, so every gauge picks the same one. False = this gauge has
+// the newest firmware (or as new as any).
+static bool findNewestGauge(UpdTarget &newest, uint8_t version[3])
+{
+  uint8_t ourVersion[3];
+  chainUpdateVersion(ourVersion);
+  uint32_t bestNumber = versionNumber(ourVersion);
+  bool isFound = false;
+  LinkNode nodes[16];
+  const uint8_t count = linkNodes(nodes, 16);
+  for (uint8_t i = 0; i < count; i++)
+  {
+    LinkNode node = nodes[i];
+    const bool heardOnEspNow = (node.via & 2) != 0; // bit 1 = heard on ESP-NOW
+    if (!heardOnEspNow || node.updateProto < 1 || node.board != chainUpdateBoardId())
+    {
+      continue; // it couldn't update the others
+    }
+    const uint32_t number = versionNumber(node.version);
+    bool isBetter = false;
+    if (number > bestNumber)
+    {
+      isBetter = true; // newer than this gauge, and than any found so far
+    }
+    else if (isFound && number == bestNumber && node.node < newest.node)
+    {
+      isBetter = true; // as new as the best found: the lower node number wins
+    }
+    if (isBetter)
+    {
+      newest.node = node.node;
+      memcpy(newest.mac, node.mac, 6);
+      copyStr(newest.name, NAME_LEN, node.name);
+      memcpy(version, node.version, 3);
+      bestNumber = number;
+      isFound = true;
+    }
+  }
+  return isFound;
+}
+
+// Update All Gauges was pressed here, but another gauge has newer firmware: it's asked to update the gauges (this one
+// too). Its answer goes on the status line; the update itself then shows here as "Being updated by G...".
+static void askNewestGauge()
+{
+  UpdPlease please;
+  fillUpdHeader(please.header, UPD_PLEASE, (uint16_t)esp_random(), 1);
+  keyCode((const uint8_t *)&please, offsetof(UpdPlease, hmac), please.hmac);
+  char text[80];
+  snprintf(text, sizeof(text), "Asking G%u (v%u.%u.%u, the newest) to update the gauges", newestGauge.node,
+           newestVersion[0], newestVersion[1], newestVersion[2]);
+  setStatusText(text);
+  stopRequested = false;
+  UpdReply reply;
+  if (!askTarget(newestGauge, (uint8_t *)&please, sizeof(please), 1500, 3, reply))
+  {
+    snprintf(text, sizeof(text), "G%u (the newest) didn't answer - try again", newestGauge.node);
+  }
+  else if (reply.status == UPD_OK)
+  {
+    snprintf(text, sizeof(text), "G%u (v%u.%u.%u) is updating the gauges, this one too", newestGauge.node,
+             newestVersion[0], newestVersion[1], newestVersion[2]);
+  }
+  else
+  {
+    snprintf(text, sizeof(text), "G%u (the newest) can't: %s", newestGauge.node, replyText(reply.status));
+  }
+  DEBUG("CHAIN UPDATE: %s", text);
+  setStatusText(text);
+}
+
+// ---------------------------------------------------------------------------
 // the task: made at boot and kept (0.25.3), it waits on the packet queue when there is nothing to do
 // ---------------------------------------------------------------------------
 static void updateTask(void *)
@@ -1427,6 +1828,16 @@ static void updateTask(void *)
     {
       sendRequested = false;
       runSendJob();
+    }
+    if (setupRequested) // 0.38.7: First Boot's setup to the other gauges
+    {
+      setupRequested = false;
+      runSetupJob();
+    }
+    if (pleaseRequested) // 0.39.5: another gauge has newer firmware: ask it to update the gauges
+    {
+      pleaseRequested = false;
+      askNewestGauge();
     }
     if (xQueueReceive(packetQueue, &receivedPacket, pdMS_TO_TICKS(200)) == pdTRUE)
     {
@@ -1492,6 +1903,22 @@ bool chainUpdateStart(String &reason)
     reason = "engine running or moving - park first";
     return false;
   }
+  // 0.39.5: the newest firmware in the chain is the one passed on. Another gauge has newer firmware than this one: it's
+  // asked to update the gauges, this one included (askNewestGauge, in the update task).
+  if (findNewestGauge(newestGauge, newestVersion))
+  {
+    pleaseRequested = true;
+    if (!startTask())
+    {
+      pleaseRequested = false;
+      reason = "the update task couldn't start at boot (not enough internal RAM) - restart the gauge";
+      return false;
+    }
+    reason = "G";
+    reason += newestGauge.node;
+    reason += " has newer firmware: asking it to update all the gauges, this one too";
+    return true;
+  }
   esp_ota_img_states_t imageState;
   if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &imageState) == ESP_OK &&
       imageState == ESP_OTA_IMG_PENDING_VERIFY)
@@ -1520,7 +1947,89 @@ void chainUpdateStop()
 
 bool chainUpdateBusy()
 {
-  return sending || receiving || sendRequested;
+  return sending || receiving || sendRequested || setupRequested || pleaseRequested;
+}
+
+// 0.38.7: First Boot's "Set Up the Other Gauges the Same" (the settings are in UPD_SETUP_FILE already)
+bool chainSetupStart(String &reason)
+{
+  if (!settings.chainEnabled)
+  {
+    reason = "the chain is off";
+    return false;
+  }
+  if (!linkStats().espNowUp)
+  {
+    reason = "ESP-NOW is off (Transport: Auto or ESP-NOW)";
+    return false;
+  }
+  if (sending || receiving || otaInProgress())
+  {
+    reason = "an update is already running";
+    return false;
+  }
+  setupRequested = true;
+  if (!startTask())
+  {
+    setupRequested = false;
+    reason = "the update task couldn't start at boot (not enough internal RAM) - restart the gauge";
+    return false;
+  }
+  reason = "setting up the other gauges";
+  return true;
+}
+
+// 0.38.7: in a row that shares one setup, each gauge starts on its own page: the row's gauge 1 on the first switched-on
+// page, gauge 2 on the second ... (round again when the row is longer than the pages). Not in a row: left as it is.
+void chainSetupStartPage()
+{
+  if (settings.rowPosition == 0)
+  {
+    return;
+  }
+  uint8_t enabledCount = 0;
+  for (uint8_t i = 0; i < MAX_PAGES; i++)
+  {
+    if (settings.pages[i].enabled)
+    {
+      enabledCount++;
+    }
+  }
+  if (enabledCount == 0)
+  {
+    return;
+  }
+  settings.startPage = (settings.rowPosition - 1) % enabledCount; // counted among the switched-on pages, as GaugeUI does
+  settingsDirty = true;
+}
+
+// 0.38.7: a setup job's settings, applied as a web UI save would, then this gauge's own start page, First Boot done
+// and SET UP on the screen
+static void applyPushedSetup()
+{
+  String body;
+  File file = LittleFS.open(UPD_SETUP_FILE, "r");
+  if (file)
+  {
+    body = file.readString();
+    file.close();
+  }
+  LittleFS.remove(UPD_SETUP_FILE);
+  if (body.length() == 0 || !apiSettingsApply(body))
+  {
+    uiProgress("SETUP FAILED", "couldn't read the settings", 0, true, 5000);
+    setStatusText("The setup that came couldn't be read");
+    return;
+  }
+  canDbcLoadAll(); // the car's DBCs came too (when the other gauge had them)
+  chainSetupStartPage();
+  firstBootSetState(FIRSTBOOT_DONE); // no "Set this gauge up?" question any more
+  uiFirstBootHide();
+  char detail[40];
+  snprintf(detail, sizeof(detail), "the same as G%u", senderNode);
+  uiProgress("SET UP", detail, 100, false, 3000);
+  setStatusText("Set up the same as another gauge");
+  DEBUG("CHAIN UPDATE: set up the same as G%u", senderNode);
 }
 
 void chainUpdateGetStatus(ChainUpdateStatus &out)

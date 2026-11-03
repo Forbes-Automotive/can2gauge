@@ -1,27 +1,33 @@
+// USB bench console - see can2gauge_Console.h for the commands.
+
 #include <can2gauge_Console.h>
-#include <esp_attr.h> // EXT_RAM_BSS_ATTR (0.28.2): a buffer marked with it lives in PSRAM, not internal RAM - internal RAM is kept for WiFi, Bluetooth and task stacks
-#include <can2gauge_API.h> // apiConsoleRequest(): the same handlers the web UI uses
-#include <LittleFS.h>      // FILEGET / FILEPUT
+#include <esp_attr.h>       // EXT_RAM_BSS_ATTR: a buffer marked with it lives in PSRAM, not internal RAM - internal RAM is kept for WiFi, Bluetooth and task stacks
+#include <can2gauge_API.h>  // apiConsoleRequest(): the same handlers the web UI uses
+#include <LittleFS.h>       // FILEGET / FILEPUT
 #include <mbedtls/base64.h> // files travel as base64 text lines (the serial carries debug text too)
 #include <esp_rom_crc.h>    // esp_rom_crc32_le(): a check value for each file sent or received
-#include <ME7Read.h>        // me7ReadDump(): the ECU flash read held in memory (0.17.4)
+#include <ME7Read.h>        // me7ReadDump(): the ECU flash read held in memory
+#include <LVGL_Driver.h>    // lvglScreenBuffer(): the screen grab
 
-// USB bench console (0.17.3) - see can2gauge_Console.h for the commands.
-
-#define CONSOLE_LINE_MAX 1600     // longest command line (a POST with a settings JSON, or a FILEDATA line)
-#define CONSOLE_CHUNK_BYTES 576   // file bytes per "@@B64" line (576 bytes = 768 base64 characters)
+// ===== Settings for this file =====
+#define CONSOLE_LINE_MAX 1600      // longest command line (a POST with a settings JSON, or a FILEDATA line)
+#define CONSOLE_CHUNK_BYTES 576    // file bytes per "@@B64" line (576 bytes = 768 base64 characters)
 #define CONSOLE_TX_TIMEOUT_MS 2000 // while a file is sent: wait this long for the PC rather than drop data
 #define CONSOLE_TX_NORMAL_MS 10    // the usual timeout (main.cpp): no PC listening must never hold a task up
+#define SCREEN_GRAB_BYTES (DISPLAY_WIDTH * DISPLAY_HEIGHT * 2) // one whole screen, RGB565: 2 bytes a pixel (460,800)
 
-static TaskHandle_t consoleTask = NULL;
-EXT_RAM_BSS_ATTR static char consoleLine[CONSOLE_LINE_MAX]; // the command being typed in (static: kept off the task's stack)
-static uint16_t consoleLineLength = 0;
-static File uploadFile;                     // the file FILEPUT opened, until FILEEND
-static uint32_t uploadBytes = 0;            // bytes written to it so far
-static uint32_t uploadCrc = 0;              // check value of those bytes
-EXT_RAM_BSS_ATTR static uint8_t fileBuffer[CONSOLE_CHUNK_BYTES];             // one piece of a file
-EXT_RAM_BSS_ATTR static unsigned char base64Buffer[CONSOLE_LINE_MAX + 4];    // the same piece as base64 text (or decoded from it)
+// ===== Variables for this file =====
+// (static = private to this file; the big buffers are static so they are kept off the task's stack)
+static uint32_t uploadBytes = 0;                                          // bytes written to the FILEPUT file so far
+static uint32_t uploadCrc = 0;                                            // check value of those bytes
+static uint16_t consoleLineLength = 0;                                    // characters in consoleLine so far
+EXT_RAM_BSS_ATTR static uint8_t fileBuffer[CONSOLE_CHUNK_BYTES];          // one piece of a file
+EXT_RAM_BSS_ATTR static unsigned char base64Buffer[CONSOLE_LINE_MAX + 4]; // the same piece as base64 text (or decoded from it)
+EXT_RAM_BSS_ATTR static char consoleLine[CONSOLE_LINE_MAX];               // the command being typed in
+static File uploadFile;                                                   // the file FILEPUT opened, until FILEEND
+static TaskHandle_t consoleTaskHandle = NULL;                             // the console task, kept for debugging
 
+// ===== Small helpers =====
 // one reply line: "@@C2G <code> <json text>"
 static void consoleReply(int code, const String &json)
 {
@@ -33,38 +39,147 @@ static void consoleReply(int code, const String &json)
   Serial.write((const uint8_t *)line.c_str(), line.length()); // one write: debug lines can't land in the middle
 }
 
-// 0.17.4: FILEGET /api/me7read/bin - the ECU flash read held in memory, sent the same way as a file
-static void consoleDumpGet()
+// ===== Functions in this file =====
+static void consoleTask(void *parameter);        // collects the USB serial into lines and runs each one
+static void consoleCommand(char *line);          // runs one whole command line
+static void consoleFileGet(const char *path);    // FILEGET: a file as base64 lines
+static void consoleDumpGet();                    // FILEGET /api/me7read/bin: the ECU flash read held in memory
+static void consoleScreenGet(bool isOnGlass);    // FILEGET /api/screen/glass or /back: a screen frame buffer
+static void consoleSendBytes(const uint8_t *data, uint32_t size); // a block of memory sent the way FILEGET sends a file
+static void consoleFilePut(const char *path);    // FILEPUT: starts a new file
+static void consoleFileData(const char *text);   // FILEDATA: one more piece of it
+static void consoleFileEnd();                    // FILEEND: the file is complete
+static void consoleFileDelete(const char *path); // FILEDEL: removes an uploaded file
+static bool uploadAllowed(const char *path);     // may the console write to / delete this path?
+
+// starts the console task, only with a PC on the USB port (does nothing with enableConsole 0)
+void setupConsole()
 {
-  uint32_t size = 0;
-  const uint8_t *dump = me7ReadDump(size);
-  if (dump == NULL || size == 0)
+#if enableConsole
+  // only with a PC on the USB port at boot (Serial is true then). In the car nothing is plugged in, and the console's
+  // 8 KB stack is internal RAM that Bluetooth and the web UI need. On the bench the PC is there from power-up.
+  if (!Serial)
   {
-    consoleReply(404, "{\"error\":\"no ECU read in memory\"}");
+    DEBUG("USB bench console: no PC on the USB port - not started");
     return;
   }
-  consoleReply(200, String("{\"size\":") + size + "}");
-  Serial.setTxTimeoutMs(CONSOLE_TX_TIMEOUT_MS); // wait for the PC rather than drop any of it
-  uint32_t crc = 0;
-  uint32_t sent = 0;
-  while (sent < size)
+  DEBUG("Setting up the USB bench console...");
+  xTaskCreatePinnedToCore(consoleTask,        // the function the task runs
+                          "console",          // its name (shows in crash reports)
+                          8192,               // stack bytes: the API handlers build their JSON replies here (6 KB
+                                              // overflowed on a POST /api/settings, crash 2026-10-26)
+                          NULL,               // no parameter
+                          1,                  // low priority: the gauge's own work comes first
+                          &consoleTaskHandle, // handle, kept for debugging
+                          0);                 // core 0, with the other communication tasks
+  DEBUG("Set up the USB bench console!");
+#endif
+}
+
+// collects characters from the USB serial into lines and runs each one
+static void consoleTask(void *parameter)
+{
+  (void)parameter;
+  bool lineTooLong = false; // the current line ran past CONSOLE_LINE_MAX: it's dropped at its end
+  while (1)
   {
-    uint32_t count = size - sent;
-    if (count > CONSOLE_CHUNK_BYTES)
+    if (!Serial.available())
     {
-      count = CONSOLE_CHUNK_BYTES;
+      vTaskDelay(pdMS_TO_TICKS(5)); // nothing typed: check again shortly
+      continue;
     }
-    crc = esp_rom_crc32_le(crc, dump + sent, count);
-    size_t textLength = 0;
-    mbedtls_base64_encode(base64Buffer, sizeof(base64Buffer), &textLength, dump + sent, count);
-    String line = "@@B64 ";
-    line += (const char *)base64Buffer;
-    line += '\n';
-    Serial.write((const uint8_t *)line.c_str(), line.length());
-    sent += count;
+    const int received = Serial.read();
+    if (received < 0 || received == '\r')
+    {
+      continue;
+    }
+    if (received == '\n')
+    {
+      if (lineTooLong)
+      {
+        consoleReply(413, "{\"error\":\"line too long\"}");
+      }
+      else if (consoleLineLength > 0)
+      {
+        consoleLine[consoleLineLength] = '\0';
+        consoleCommand(consoleLine);
+      }
+      consoleLineLength = 0;
+      lineTooLong = false;
+      continue;
+    }
+    if (consoleLineLength < CONSOLE_LINE_MAX - 1)
+    {
+      consoleLine[consoleLineLength] = (char)received;
+      consoleLineLength++;
+    }
+    else
+    {
+      lineTooLong = true;
+    }
   }
-  Serial.setTxTimeoutMs(CONSOLE_TX_NORMAL_MS);
-  consoleReply(200, String("{\"size\":") + sent + ",\"crc32\":" + crc + "}");
+}
+
+// one whole command line
+static void consoleCommand(char *line)
+{
+  if (!strcmp(line, "PING"))
+  {
+    consoleReply(200, String("{\"version\":\"") + CAN2GAUGE_VERSION + "\",\"uptime\":" + (millis() / 1000) + "}");
+    return;
+  }
+  if (!strncmp(line, "GET ", 4))
+  {
+    const char *path = line + 4;
+    if (!apiConsoleRequest("GET", path, String()))
+    {
+      consoleReply(404, "{\"error\":\"not a console route\"}");
+    }
+    return;
+  }
+  if (!strncmp(line, "POST ", 5))
+  {
+    // POST <path> <json>: the path ends at the first space, the JSON is the rest (may be empty)
+    char *path = line + 5;
+    char *body = strchr(path, ' ');
+    String bodyText;
+    if (body != NULL)
+    {
+      body[0] = '\0'; // ends the path
+      bodyText = body + 1;
+    }
+    if (!apiConsoleRequest("POST", path, bodyText))
+    {
+      consoleReply(404, "{\"error\":\"not a console route\"}");
+    }
+    return;
+  }
+  if (!strncmp(line, "FILEGET ", 8))
+  {
+    consoleFileGet(line + 8);
+    return;
+  }
+  if (!strncmp(line, "FILEPUT ", 8))
+  {
+    consoleFilePut(line + 8);
+    return;
+  }
+  if (!strncmp(line, "FILEDATA ", 9))
+  {
+    consoleFileData(line + 9);
+    return;
+  }
+  if (!strcmp(line, "FILEEND"))
+  {
+    consoleFileEnd();
+    return;
+  }
+  if (!strncmp(line, "FILEDEL ", 8))
+  {
+    consoleFileDelete(line + 8);
+    return;
+  }
+  consoleReply(400, "{\"error\":\"unknown command\"}");
 }
 
 // FILEGET <path>: the whole file as base64 lines, then its size and check value
@@ -73,6 +188,16 @@ static void consoleFileGet(const char *path)
   if (!strcmp(path, "/api/me7read/bin"))
   {
     consoleDumpGet(); // not a file: the ECU read in memory
+    return;
+  }
+  if (!strcmp(path, "/api/screen/glass"))
+  {
+    consoleScreenGet(true); // not a file: the picture on the screen
+    return;
+  }
+  if (!strcmp(path, "/api/screen/back"))
+  {
+    consoleScreenGet(false); // the screen's other frame buffer (where the next picture is drawn)
     return;
   }
   File file = LittleFS.open(path, "r");
@@ -107,18 +232,70 @@ static void consoleFileGet(const char *path)
   consoleReply(200, String("{\"size\":") + sent + ",\"crc32\":" + crc + "}");
 }
 
-// only these folders take uploads from the console (the .ecu / .cfg files and logs), never the web UI's own files
-static bool uploadAllowed(const char *path)
+// FILEGET /api/me7read/bin - the ECU flash read held in memory, sent the same way as a file
+static void consoleDumpGet()
 {
-  if (!strncmp(path, "/me7/", 5))
+  uint32_t size = 0;
+  const uint8_t *dump = me7ReadDump(size);
+  if (dump == NULL || size == 0)
   {
-    return true;
+    consoleReply(404, "{\"error\":\"no ECU read in memory\"}");
+    return;
   }
-  if (!strncmp(path, "/logs/", 6))
+  consoleSendBytes(dump, size);
+}
+
+// FILEGET /api/screen/glass (or /back): one of the screen's two frame buffers as it is now, raw RGB565 (480 x 480,
+// 2 bytes a pixel, low byte first). The LVGL lock is held while it's sent (~2 s), so nothing is drawn into it
+// meanwhile: the screen stands still for that long. For the bench only (tools/diag/screen_grab.py makes PNGs of it).
+static void consoleScreenGet(bool isOnGlass)
+{
+  if (!lvglLock(1000))
   {
-    return true;
+    consoleReply(503, "{\"error\":\"screen busy\"}");
+    return;
   }
-  return false;
+  const uint16_t *screen = lvglScreenBuffer(isOnGlass);
+  if (screen == NULL)
+  {
+    lvglUnlock();
+    consoleReply(404, "{\"error\":\"no such frame buffer\"}");
+    return;
+  }
+  consoleSendBytes((const uint8_t *)screen, SCREEN_GRAB_BYTES);
+  lvglUnlock();
+}
+
+// A block of memory sent the way FILEGET sends a file: its size, the bytes as base64 lines, then the size sent and a
+// check value. Stops early if the PC stops reading (a line only part sent), so a closed script can't hold the gauge up.
+static void consoleSendBytes(const uint8_t *data, uint32_t size)
+{
+  consoleReply(200, String("{\"size\":") + size + "}");
+  Serial.setTxTimeoutMs(CONSOLE_TX_TIMEOUT_MS); // wait for the PC rather than drop any of it
+  uint32_t crc = 0;
+  uint32_t sent = 0;
+  while (sent < size)
+  {
+    uint32_t count = size - sent;
+    if (count > CONSOLE_CHUNK_BYTES)
+    {
+      count = CONSOLE_CHUNK_BYTES;
+    }
+    size_t textLength = 0;
+    mbedtls_base64_encode(base64Buffer, sizeof(base64Buffer), &textLength, data + sent, count);
+    String line = "@@B64 ";
+    line += (const char *)base64Buffer;
+    line += '\n';
+    const size_t written = Serial.write((const uint8_t *)line.c_str(), line.length());
+    if (written < line.length())
+    {
+      break; // the PC stopped reading: the closing size below shows how much went
+    }
+    crc = esp_rom_crc32_le(crc, data + sent, count); // the check value covers what was sent
+    sent += count;
+  }
+  Serial.setTxTimeoutMs(CONSOLE_TX_NORMAL_MS);
+  consoleReply(200, String("{\"size\":") + sent + ",\"crc32\":" + crc + "}");
 }
 
 // FILEPUT <path>: a new, empty file for the FILEDATA lines that follow
@@ -177,11 +354,11 @@ static void consoleFileEnd()
     return;
   }
   uploadFile.close();
-  fsUsageChanged(); // 0.17.4: the space used changed
+  fsUsageChanged(); // the space used changed
   consoleReply(200, String("{\"size\":") + uploadBytes + ",\"crc32\":" + uploadCrc + "}");
 }
 
-// 0.17.4: FILEDEL <path> - removes an uploaded file (only /me7/ and /logs/, the same folders FILEPUT may write to).
+// FILEDEL <path> - removes an uploaded file (only /me7/ and /logs/, the same folders FILEPUT may write to).
 // The bench filled the filesystem with .ecu copies (~125 KB each, ~330 KB free with the web UI image).
 static void consoleFileDelete(const char *path)
 {
@@ -199,131 +376,16 @@ static void consoleFileDelete(const char *path)
   consoleReply(200, "{\"status\":\"deleted\"}");
 }
 
-// one whole command line
-static void consoleCommand(char *line)
+// only these folders take uploads from the console (the .ecu / .cfg files and logs), never the web UI's own files
+static bool uploadAllowed(const char *path)
 {
-  if (!strcmp(line, "PING"))
+  if (!strncmp(path, "/me7/", 5))
   {
-    consoleReply(200, String("{\"version\":\"") + CAN2GAUGE_VERSION + "\",\"uptime\":" + (millis() / 1000) + "}");
-    return;
+    return true;
   }
-  if (!strncmp(line, "GET ", 4))
+  if (!strncmp(path, "/logs/", 6))
   {
-    const char *path = line + 4;
-    if (!apiConsoleRequest("GET", path, String()))
-    {
-      consoleReply(404, "{\"error\":\"not a console route\"}");
-    }
-    return;
+    return true;
   }
-  if (!strncmp(line, "POST ", 5))
-  {
-    // POST <path> <json>: the path ends at the first space, the JSON is the rest (may be empty)
-    char *path = line + 5;
-    char *body = strchr(path, ' ');
-    String bodyText;
-    if (body != NULL)
-    {
-      *body = '\0'; // ends the path
-      bodyText = body + 1;
-    }
-    if (!apiConsoleRequest("POST", path, bodyText))
-    {
-      consoleReply(404, "{\"error\":\"not a console route\"}");
-    }
-    return;
-  }
-  if (!strncmp(line, "FILEGET ", 8))
-  {
-    consoleFileGet(line + 8);
-    return;
-  }
-  if (!strncmp(line, "FILEPUT ", 8))
-  {
-    consoleFilePut(line + 8);
-    return;
-  }
-  if (!strncmp(line, "FILEDATA ", 9))
-  {
-    consoleFileData(line + 9);
-    return;
-  }
-  if (!strcmp(line, "FILEEND"))
-  {
-    consoleFileEnd();
-    return;
-  }
-  if (!strncmp(line, "FILEDEL ", 8))
-  {
-    consoleFileDelete(line + 8);
-    return;
-  }
-  consoleReply(400, "{\"error\":\"unknown command\"}");
-}
-
-// collects characters from the USB serial into lines and runs each one
-static void consoleTaskFn(void *parameter)
-{
-  (void)parameter;
-  bool lineTooLong = false; // the current line ran past CONSOLE_LINE_MAX: it's dropped at its end
-  while (1)
-  {
-    if (!Serial.available())
-    {
-      vTaskDelay(pdMS_TO_TICKS(5)); // nothing typed: check again shortly
-      continue;
-    }
-    const int received = Serial.read();
-    if (received < 0 || received == '\r')
-    {
-      continue;
-    }
-    if (received == '\n')
-    {
-      if (lineTooLong)
-      {
-        consoleReply(413, "{\"error\":\"line too long\"}");
-      }
-      else if (consoleLineLength > 0)
-      {
-        consoleLine[consoleLineLength] = '\0';
-        consoleCommand(consoleLine);
-      }
-      consoleLineLength = 0;
-      lineTooLong = false;
-      continue;
-    }
-    if (consoleLineLength < CONSOLE_LINE_MAX - 1)
-    {
-      consoleLine[consoleLineLength] = (char)received;
-      consoleLineLength++;
-    }
-    else
-    {
-      lineTooLong = true;
-    }
-  }
-}
-
-void setupConsole()
-{
-#if enableConsole
-  // 0.24.18: only with a PC on the USB port at boot (Serial is true then). In the car nothing is plugged in, and the
-  // console's 8 KB stack is internal RAM that Bluetooth and the web UI need. On the bench the PC is there from power-up.
-  if (!Serial)
-  {
-    DEBUG("USB bench console: no PC on the USB port - not started");
-    return;
-  }
-  DEBUG("Setting up the USB bench console...");
-  xTaskCreatePinnedToCore(consoleTaskFn, // the function the task runs
-                          "console",     // its name (shows in crash reports)
-                          8192,          // stack bytes: the API handlers build their JSON replies here. 0.24.10: back to
-                                         // 8 KB - 0.24.6's 6 KB overflowed on a POST /api/settings (crash, 2026-10-26)
-                          NULL,          // no parameter
-                          1,             // low priority: the gauge's own work comes first
-                          &consoleTask,  // handle, kept for debugging
-                          0);            // core 0, with the other communication tasks
-  DEBUG("Set up the USB bench console!");
-#endif
+  return false;
 }

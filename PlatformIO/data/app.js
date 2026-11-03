@@ -889,7 +889,15 @@ async function chainPicked(e) {
   setTimeout(pollChain, 1500); // the gauge's next heartbeat carries the change
 }
 
-// 0.25.0: Update Other Gauges - what this gauge is doing, then each other gauge: its version and how its update went
+// a firmware version as one number, so two can be compared ("0.39.5" -> 3905); 0 when unknown
+function chainVersionNumber(version) {
+  const parts = String(version || "").split(".").map(Number);
+  if (parts.length < 3 || isNaN(parts[0])) return 0;
+  return parts[0] * 10000 + parts[1] * 100 + parts[2];
+}
+
+// Update All Gauges - what this gauge is doing, then each other gauge: its version and how its update went. The gauge
+// with the newest firmware sends the update, whichever gauge the button is pressed on (0.39.5).
 function showChainUpdate(r) {
   const u = r.update || { results: [] };
   let state = "Idle";
@@ -906,6 +914,7 @@ function showChainUpdate(r) {
     else if (!n.canUpdate) note = n.version ? "only heard on CAN" : "older than 0.25.0";
     else if (!n.sameBoard) note = "different board";
     else if (n.version === r.version) note = "same version";
+    else if (chainVersionNumber(n.version) > chainVersionNumber(r.version)) note = "newer: it sends the update";
     else note = "can be updated";
     // two lines a gauge, so it fits a phone: who and which version, then how it's going
     return "G" + n.node + " " + String(n.name || "") + "  " + (n.version ? "v" + n.version : "before 0.25.0") + "\n   " + note;
@@ -1158,9 +1167,9 @@ async function pollVdiag() {
   if (p && p.text) $("vdProbeOut").textContent = "DID " + vdHex(p.id, 4) + ": " + p.text + (p.hex ? "\n" + p.hex : "");
 }
 
-// one switch per thing the car may have: its glass menu entry, its tab and its Dashboard tile, in tab order
-// (Oil / ECU / Triggers are tabs only; Output / Illumination is the glass menu only - its settings are on Settings)
-const menuItems = [["gauges", "Gauges"], ["can", "CAN Bus"], ["haldex", "OpenHaldex"], ["adc", "ADC"], ["ecu", "usb2ip"], ["kline", "K-line"],
+// one switch per thing the car may have: its glass menu entry, its tab and its Dashboard tile, in tab order (the glass
+// menu goes in the same order). Output / Illumination has no tab of its own - its settings are on Settings.
+const menuItems = [["gauges", "Gauges"], ["nav", "Navigation"], ["can", "CAN Bus"], ["haldex", "OpenHaldex"], ["adc", "ADC"], ["ecu", "usb2ip"], ["kline", "K-line"],
   ["oil", "Oil"], ["dsg", "Gearbox"], ["ble", "Bluetooth OBD"], ["triggers", "Triggers"], ["chain", "Daisy Chain"], ["output", "Output / Illumination"],
   ["drag", "Drag Timer"]]; // 0.38.0
 function menuOn(menu, key) { // a switch the firmware doesn't know yet counts as on (older firmware, the sim)
@@ -1474,6 +1483,9 @@ function renderKlBlock() {
   if (r.title) {
     title = title + " · " + r.title;
   }
+  if (r.obd) { // 0.39.6: the engine didn't answer at 0x01, OBD-II at 0x33 did: pages of PIDs instead of blocks
+    title = "OBD-II at 0x33 · page " + r.group + " of " + r.pages;
+  }
   const head = klAddLine(box, "kl-block-head", title);
   if (r.ageMs && !r.searching) {
     klAddLine(head, "kl-age", r.ageMs + " ms ago");
@@ -1491,7 +1503,7 @@ function renderKlBlock() {
     klAddLine(box, "kl-note", "Reading...");
     return;
   }
-  const showDetails = $("klDetails").checked;
+  const showDetails = $("klDetails").checked && !r.obd; // OBD-II PIDs have no formula / a / b bytes
   for (let i = 0; i < r.fields.length; i++) {
     const field = r.fields[i];
     const row = klAddLine(box, "kl-field", "");

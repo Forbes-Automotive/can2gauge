@@ -12,6 +12,7 @@
 #define LBL_NAME_LEN 40
 #define LBL_MAX_CANDS 6
 
+void setupLabels(); // the lookup's lock: call in setup, before setupKLine and the web server
 void labelsPartOf(const char *ident, char *part, size_t len); // "06A906032HN  1.8L R4/5VT ..." -> "06A906032HN"
 // 0.17.4: reads /lbl/index.txt into PSRAM (once; later calls return at once). The K-line task calls it before it wakes
 // a module, so finding the label file after the module answers takes milliseconds, not seconds. false = no index

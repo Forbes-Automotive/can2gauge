@@ -7,12 +7,13 @@
 //   swipe left/right    next / previous page (smooth slide, settings.swipeAnimMs)
 //   long press          mode menu (docs/ui-concept): one item per screen - big icon, name, a line of text, live status;
 //                       swipe left / right for the next item, tap opens it, long press (or 10 s idle) back to the
-//                       gauge. Items: Haldex, CAN, K-line, Output / lights, DSG, Bluetooth OBD, Gauge chain (each can be
-//                       hidden with settings.menuMask), Settings
+//                       gauge. One item per Settings > Device > Menu and Tabs switch, in that order (each hidden with
+//                       settings.menuMask), then Settings
 //   menu > Haldex       the Haldex gauge; swipe left / right requests the next / previous Haldex mode
-//   menu > CAN / K-line / Bluetooth OBD / Output / Daisy Chain
+//   menu > Navigation / CAN / ADC / usb2ip / K-line / Oil / Bluetooth OBD / Triggers / Daisy Chain / Output
 //                       mode screens: connection status (spinner while connecting), then live data the firmware fills
-//                       (uiSetModeProvider); swipe left / right = next / previous block, message or page
+//                       (uiSetModeProvider); swipe left / right = next / previous block, message or page. Navigation's
+//                       option buttons (Off / Pop Up / Route) answer a tap or a swipe.
 //   menu > Gauges       back to the gauge pages; the menu's 10 s timeout returns to the screen it was opened from
 //   menu > DSG          full screen: big selector + gear (P R N D4 S3 M2), P R N D S M strip, speed (gearbox or vehicle)
 //   menu > Drag Timer   0.38.0: 0-100 km/h / 0-60 mph from a countdown, with a scoreboard (DragTimer.cpp)
@@ -48,6 +49,8 @@ struct UiCallbacks
   void (*onPageChanged)(uint8_t page); // a gauge page was shown (gauge chain "follow page")
   void (*onModeSwipe)(uint8_t item, int8_t direction); // swipe on a mode screen (uiMenuItem_t): +1 next, -1 previous
   bool (*onHaldexMode)(uint8_t mode);           // swipe on the Haldex screen: request this mode (false = not sent)
+  void (*onModeChoice)(uint8_t item, uint8_t choice); // an option button tapped on a mode screen (0 = the first)
+  void (*onNavDismissed)();                     // the nav card was tapped or held away (back to the gauges)
 };
 
 // mode screens (menu > CAN / K-line / Bluetooth OBD): the firmware fills a UiModeView ~10x/s while one shows
@@ -77,8 +80,12 @@ struct UiModeView
   uint8_t nodes;   // > 0: a row of node circles in place of the header (Daisy Chain), up to UI_MODE_NODES
   char nodeName[6][6];
   uint8_t nodeFlags[6]; // UI_NODE_*
+  uint8_t choices;      // > 0: a row of option buttons in place of the header (Navigation: Off / Pop Up / Route)
+  int8_t choiceOn;      // the button lit (the one in use), -1 = none
+  char choiceName[3][12];
 };
 #define UI_MODE_NODES 6
+#define UI_MODE_CHOICES 3 // most option buttons on a mode screen
 #define UI_NODE_SELF 1   // this gauge (filled in the accent)
 #define UI_NODE_MASTER 2 // the chain master (second accent ring)
 #define UI_NODE_HEARD 4  // heard recently (grey when not)
@@ -137,7 +144,7 @@ void uiProgress(const char *title, const char *detail, int pct, bool failed = fa
 void uiShowNumber(const char *number, const char *detail, uint32_t showMs);
 // 0.30.0: turn-by-turn navigation card (src/can2gauge_Nav.cpp fills it from the can2gauge Link phone app), laid out
 // like Android Auto's: the turn arrow and the distance on a band in the accent colour, the road under it, the arrival
-// time at the bottom. Over everything; a tap hides it until the next turn.
+// time at the bottom. Over everything; a tap or a long press hides it and goes back to the gauges (onNavDismissed).
 #define UI_NAV_ARROW_MAX 64 // the turn arrow is at most 64 x 64 dots (the app sends 48 x 48)
 struct UiNavView
 {

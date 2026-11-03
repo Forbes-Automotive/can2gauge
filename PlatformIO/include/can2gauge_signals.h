@@ -140,6 +140,8 @@ enum signalId_t : uint8_t
   SIG_CONVERTER_SLIP, // engine rpm - gearbox input rpm (worked out when both are fresh)
   // ---- 0.28.0
   SIG_BARO,           // mbar: the ECU's own barometric pressure (from its DBC); boost = MAP - this when it's fresh
+  // ---- 0.38.4
+  SIG_FUEL_LITRES,    // L: the fuel in the tank as the VAG cluster sends it (SIG_FUEL_LEVEL is OBD's %, a share of the tank)
   SIG_COUNT
 };
 #define ADC_SIGS 16

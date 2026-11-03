@@ -509,7 +509,11 @@ bool userSigNote(signalId_t id, char *buf, size_t len)
     {
       snprintf(buf, len, "Waiting for PID %02X", userSig->pid);
     }
-    else if (!settings.elmMac[0])
+    else if (settings.elmTransport == ELM_TR_WIFI && !settings.elmWifiSsid[0])
+    {
+      copyStr(buf, len, "No WiFi OBD adapter set up - see the web UI");
+    }
+    else if (settings.elmTransport != ELM_TR_WIFI && !settings.elmMac[0])
     {
       copyStr(buf, len, "No OBD adapter paired - see the web UI");
     }
@@ -528,6 +532,10 @@ bool userSigNote(signalId_t id, char *buf, size_t len)
       {
         snprintf(buf, len, "Connected - waiting for PID %02X", userSig->pid);
       }
+    }
+    else if (settings.elmTransport == ELM_TR_WIFI)
+    {
+      snprintf(buf, len, "WiFi OBD: %s", elmStatus().state);
     }
     else
     {

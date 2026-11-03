@@ -71,4 +71,5 @@ const char *vehicleSourceName(uint8_t source);
 void vehicleRequestCanRead();             // First Boot / the Your Car card asks for it
 bool vehicleCanReadWanted();
 void vehicleCanReadDone(bool found);
+void vehicleCanReadFound(const char *vin); // the VIN it read: taken by the house task (it has the stack for it)
 bool vehicleCanReadBusy();                // asked and not done yet (the web UI shows "reading")

@@ -127,6 +127,8 @@ static const SignalInfo signalTable[] = {
     {"convSlip", "Converter slip", "rpm", 0, 1000, 0, engineTimeout},
     // an ECU's barometric pressure (0.28.0, from a DBC): boost is worked out against it
     {"baro", "Baro", "mbar", 800, 1100, 0, engineTimeout},
+    // the fuel in the tank in litres, from the VAG cluster (PQ mKombi_1, MQB / MLB Kombi_02); OBD's "fuel" is % (0.38.4)
+    {"fuelLitres", "Fuel tank", "L", 0, 80, 0, engineTimeout},
 };
 static_assert(sizeof(signalTable) / sizeof(signalTable[0]) == SIG_COUNT, "signalTable rows must match signalId_t");
 // 0.36.6: one adc signal per adc2can sensor, in one block (sensor n = SIG_ADC_1 + n): raising ADC2CAN_BOARDS needs the

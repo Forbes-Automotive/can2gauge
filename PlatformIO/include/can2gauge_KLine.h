@@ -70,7 +70,7 @@ bool me7FastDiagQueue(const uint32_t *addrs, uint8_t count); // addrs/count over
 const Me7FastDiag &me7FastDiagResult();
 // 0.19.0 "Try KWP2000": double slow-init at 0x01 (KWP1281 then KWP2000). true = a KWP2000 session is up, keyBytes
 // filled. Call from the K-line task. Connect half only; the KWP2000 read path for K-line mode is still to come.
-bool kwp2000TryDoubleInit(uint8_t keyBytes[2]);
+bool kwp2000TryDoubleInit(uint8_t keyBytes[2], char *id, size_t idLen); // id: the module's identification
 // KWP1281 group -> signal map (defaults for ME7; editable from the web UI later)
 struct KwpGroupMap
 {

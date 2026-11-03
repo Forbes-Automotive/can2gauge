@@ -304,7 +304,8 @@ bool lvglInit(const DisplayPins &pins, uint8_t touchAddr, int8_t touchInt, uint8
   void *frameBuf1 = NULL;
   // partial mode's two strips come out of internal RAM, which WiFi and the tasks need too: if taking them would leave less
   // than PARTIAL_MODE_RESERVE, draw direct (the web UI's Diag tab shows the mode it is running in)
-  const size_t partialBytes = 2 * DISPLAY_WIDTH * DRAW_BUF_LINES * sizeof(lv_color_t);
+  // 2 bytes a pixel (RGB565). Not sizeof(lv_color_t): that is LVGL's 3-byte colour, which made the strips 50 % bigger
+  const size_t partialBytes = 2 * DISPLAY_WIDTH * DRAW_BUF_LINES * sizeof(uint16_t);
   if (!direct && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < partialBytes + PARTIAL_MODE_RESERVE)
   {
     direct = true;
@@ -333,7 +334,7 @@ bool lvglInit(const DisplayPins &pins, uint8_t touchAddr, int8_t touchInt, uint8
     // what's left. Without them the slides fall back to LVGL's own animation.
     pictureOld = (uint16_t *)heap_caps_aligned_alloc(16, FRAME_BYTES, MALLOC_CAP_SPIRAM);
     pictureNew = (uint16_t *)heap_caps_aligned_alloc(16, FRAME_BYTES, MALLOC_CAP_SPIRAM);
-    lv_display_set_buffers(display, frameBuf0, frameBuf1, DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(lv_color_t),
+    lv_display_set_buffers(display, frameBuf0, frameBuf1, DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t), // RGB565
                            LV_DISPLAY_RENDER_MODE_DIRECT);
   }
   else
@@ -343,7 +344,7 @@ bool lvglInit(const DisplayPins &pins, uint8_t touchAddr, int8_t touchInt, uint8
       vSemaphoreDelete(vsyncSem);
       vsyncSem = NULL;
     }
-    const size_t bufBytes = DISPLAY_WIDTH * DRAW_BUF_LINES * sizeof(lv_color_t);
+    const size_t bufBytes = DISPLAY_WIDTH * DRAW_BUF_LINES * sizeof(uint16_t); // RGB565: 2 bytes a pixel
     // internal RAM when there's room for the strips and the reserve, otherwise PSRAM (0.24.4: slower to draw into,
     // but a picture - before, a refused direct mode with no room here meant no drawing at all)
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= partialBytes + PARTIAL_MODE_RESERVE)
@@ -455,6 +456,38 @@ void lvglStartTask(UBaseType_t priority, BaseType_t core)
                           priority,  // as the caller asks
                           NULL,      // no handle kept
                           core);     // on the core the caller asks for
+}
+
+// LVGL's own screen animation (a page change from a task that can't draw its own slides, or partial drawing) holds
+// the screen it is going to (scr_to_load) and the one it came from until it ends. A screen deleted in that time
+// (GaugeUI rebuilding its pages, menu or theme) was still moved about by the next screen load: a crash in
+// lv_screen_load_anim (bench 2026-11-03, tools/diag/anim_rebuild_test.py: every round). This ends any such animation
+// at once - the screen it was going to shows, and LVGL holds on to nothing else. Caller holds the LVGL lock.
+void lvglFinishScreenAnimation()
+{
+  lv_display_t *disp = lvglDisplay();
+  if (disp == NULL || disp->scr_to_load == NULL)
+  {
+    return; // no screen animation running
+  }
+  lv_obj_t *goingTo = disp->scr_to_load;
+  // the screens it was moving: stopped and put back in place (LVGL's own load only stops the ones it knows of)
+  lv_obj_t *others[2] = {disp->prev_scr, disp->act_scr};
+  for (uint8_t i = 0; i < 2; i++)
+  {
+    if (others[i] != NULL && others[i] != goingTo)
+    {
+      lv_anim_delete(others[i], NULL);
+      lv_obj_set_pos(others[i], 0, 0);
+      lv_obj_remove_local_style_prop(others[i], LV_STYLE_OPA, 0);
+    }
+  }
+  // LVGL's own way out: a screen loaded during an animation finishes that animation first. A blank screen for a
+  // moment (never drawn: the lock is held), then the screen the animation was going to, both at once.
+  lv_obj_t *placeholder = lv_obj_create(NULL);
+  lv_screen_load(placeholder);
+  lv_screen_load(goingTo);
+  lv_obj_delete(placeholder);
 }
 
 bool lvglLock(uint32_t timeoutMs)
@@ -799,6 +832,30 @@ uint32_t lvglLastTransitionFrames()
 uint32_t lvglLastTransitionMs()
 {
   return lastTransitionMs;
+}
+
+// the bench screen grab (USB console): the frame buffer on the glass, or the other one (direct mode draws into the
+// two in turn). NULL = there isn't one (partial mode has only the one; nothing shown yet). Read it with the LVGL lock
+// held, so nothing is drawn into it meanwhile.
+const uint16_t *lvglScreenBuffer(bool isOnGlass)
+{
+  if (!directMode)
+  {
+    if (isOnGlass)
+    {
+      return (const uint16_t *)frameBufAddress; // partial mode copies its strips into the panel's first frame buffer
+    }
+    return NULL;
+  }
+  if (onGlass == NULL)
+  {
+    return NULL; // no frame shown yet
+  }
+  if (isOnGlass)
+  {
+    return onGlass;
+  }
+  return backBuffer();
 }
 
 #if SCREEN_ROTATION

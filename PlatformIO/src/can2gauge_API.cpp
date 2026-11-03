@@ -13,7 +13,7 @@
 #include <can2gauge_ELM.h>
 #include <can2gauge_Link.h>
 #include <can2gauge_Shared.h> // 0.30.4: shared settings - in step with the other gauges?
-#include <can2gauge_ChainUpdate.h> // 0.25.0: Update Other Gauges (Chain tab)
+#include <can2gauge_ChainUpdate.h> // 0.25.0: Update All Gauges (Chain tab)
 #include <can2gauge_OHX.h>
 #include <can2gauge_CanRelay.h>
 #include <can2gauge_ECU.h> // an Ignitron / MaxxECU / Link / Haltech / EMU PRO over WiFi from usb2ip
@@ -137,18 +137,29 @@ static void sendOk(AsyncWebServerRequest *request, const char *message = "ok")
 static void parseJSON(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total,
                       void (*done)(AsyncWebServerRequest *, const String &))
 {
-  String *body = (String *)request->_tempObject;
+  // gathered in a plain malloc'd buffer: if the phone drops part-way, the web server frees _tempObject itself with
+  // free(), which only gives everything back for memory from malloc
+  char *body = (char *)request->_tempObject;
   if (index == 0)
   {
-    body = new String();
-    body->reserve(total);
+    body = (char *)malloc(total + 1);
     request->_tempObject = body;
+    if (body == NULL)
+    {
+      request->send(507); // no memory for it
+      return;
+    }
   }
-  body->concat((const char *)data, len);
+  if (body == NULL || index + len > total)
+  {
+    return; // no buffer, or more than the request said it would send
+  }
+  memcpy(body + index, data, len);
   if (index + len == total)
   {
-    done(request, *body);
-    delete body;
+    body[total] = '\0';
+    done(request, String(body));
+    free(body);
     request->_tempObject = NULL;
   }
 }
@@ -193,7 +204,14 @@ static void statusOutgoing(AsyncWebServerRequest *request)
     perfObj["slideMs"] = lvglLastTransitionMs();         // ... in this long
     JsonObject benchObj = perfObj["bench"].to<JsonObject>();
     benchObj["running"] = uiPerfStats.benchRunning;
-    benchObj["ageS"] = uiPerfStats.benchMs ? (millis() - uiPerfStats.benchMs) / 1000 : -1;
+    if (uiPerfStats.benchMs)
+    {
+      benchObj["ageS"] = (millis() - uiPerfStats.benchMs) / 1000;
+    }
+    else
+    {
+      benchObj["ageS"] = -1; // never run
+    }
     benchObj["screen"] = uiPerfStats.benchScreen;
     benchObj["fps"] = uiPerfStats.benchFps;
     benchObj["frameAvgUs"] = uiPerfStats.benchFrameAvgUs;
@@ -316,7 +334,7 @@ static void statusOutgoing(AsyncWebServerRequest *request)
     if (kind == UI_SCR_MODE && displayLiveView(view, viewItem))
     {
       static const char *items[MENU_ITEM_COUNT] = {"haldex", "can", "kline", "output", "dsg", "ble", "chain", "gauges",
-                                                   "adc", "drag"}; // 0.38.0: + adc (was missing: the ADC screen sent null), drag
+                                                   "adc", "drag", "nav", "ecu", "oil", "triggers"}; // uiMenuItem_t order
       screenObj["mode"] = viewItem < MENU_ITEM_COUNT ? items[viewItem] : "";
       screenObj["title"] = view.title;
       screenObj["status"] = view.status;
@@ -1446,7 +1464,7 @@ static void chainOutgoing(AsyncWebServerRequest *request)
     }
     nodeObj["sameBoard"] = node.board == chainUpdateBoardId();
   }
-  // 0.25.0: Update Other Gauges - what's happening and how each gauge got on
+  // 0.25.0: Update All Gauges - what's happening and how each gauge got on
   doc["version"] = CAN2GAUGE_VERSION;
   EXT_RAM_BSS_ATTR static ChainUpdateStatus updateStatus; // static: ~1.2 KB, too big for the web server task's stack
   chainUpdateGetStatus(updateStatus);
@@ -1680,19 +1698,26 @@ static void applyRuntime(bool wifiChanged, bool pagesChanged, bool themeChanged,
   writeEEP();
 }
 
-static void settingsIncoming(AsyncWebServerRequest *request, const String &body)
+static SemaphoreHandle_t settingsApplyMutex = NULL; // 0.38.7: one settings save at a time (web UI, USB console, a setup
+                                                    // from another gauge): they share the "before" copy below
+
+// a settings JSON (any part of it) applied as a web UI save would: kept, and every module it touches restarted.
+// wifiChanged: the WiFi settings changed (the AP restarts). false = not JSON
+static bool settingsApplyJson(const String &body, bool &wifiChanged)
 {
+  wifiChanged = false;
   JsonDocument doc(psramJsonAllocator());
   if (deserializeJson(doc, body))
   {
-    JsonDocument errorDoc(psramJsonAllocator());
-    errorDoc["error"] = "bad json";
-    sendJSON(request, 400, errorDoc);
-    return;
+    return false;
+  }
+  if (settingsApplyMutex)
+  {
+    xSemaphoreTake(settingsApplyMutex, portMAX_DELAY);
   }
   // 0.36.3: the settings as they were, to see what changed. Kept in PSRAM, not on the async_tcp stack: at ~4.9 KB it
   // plus the reply overflowed the 8 KB stack (bench: picking Quad on the ADC source crashed the gauge, coredump).
-  // static = one copy for the file; only the async_tcp task saves settings, so two saves never share it at once.
+  // static = one copy for the file; settingsApplyMutex keeps two saves from sharing it at once.
   EXT_RAM_BSS_ATTR static Settings before;
   before = settings;
   settingsFromJson(doc);
@@ -1717,7 +1742,7 @@ static void settingsIncoming(AsyncWebServerRequest *request, const String &body)
   {
     canDbcLoadAll();
   }
-  const bool wifiChanged = memcmp(before.apSsid, settings.apSsid, WIFI_LEN) || memcmp(before.apPassword, settings.apPassword, WIFI_LEN) ||
+  wifiChanged = memcmp(before.apSsid, settings.apSsid, WIFI_LEN) || memcmp(before.apPassword, settings.apPassword, WIFI_LEN) ||
       memcmp(before.staSsid, settings.staSsid, WIFI_LEN) || memcmp(before.staPassword, settings.staPassword, WIFI_LEN) ||
       memcmp(before.hostname, settings.hostname, NAME_LEN);
   // a page holds everything about itself (style, values, sources, slots, sprite), so one compare covers it
@@ -1792,7 +1817,83 @@ static void settingsIncoming(AsyncWebServerRequest *request, const String &body)
         before.oilTempField != settings.oilTempField || before.oilLevelField != settings.oilLevelField));
   // a VAG diag value renamed / re-united on its tab: the gauge pages showing it take the new name (userSigApply)
   applyRuntime(wifiChanged, pagesChanged || vdiagChanged, themeChanged, canChanged, klineChanged);
-  sendOk(request, wifiChanged ? "ok - wifi restarting" : "ok");
+  if (settingsApplyMutex)
+  {
+    xSemaphoreGive(settingsApplyMutex);
+  }
+  return true;
+}
+
+// POST /api/settings - any part of the settings JSON
+static void settingsIncoming(AsyncWebServerRequest *request, const String &body)
+{
+  bool wifiChanged = false;
+  if (!settingsApplyJson(body, wifiChanged))
+  {
+    JsonDocument errorDoc(psramJsonAllocator());
+    errorDoc["error"] = "bad json";
+    sendJSON(request, 400, errorDoc);
+    return;
+  }
+  if (wifiChanged)
+  {
+    sendOk(request, "ok - wifi restarting");
+  }
+  else
+  {
+    sendOk(request, "ok");
+  }
+}
+
+bool apiSettingsApply(const String &body)
+{
+  bool wifiChanged = false;
+  return settingsApplyJson(body, wifiChanged);
+}
+
+static void chainSetupIncoming(AsyncWebServerRequest *request, const String &body); // below
+
+// POST /api/chain/setup: the request itself needs nothing - the reply comes from chainSetupIncoming once the body is in
+static void chainSetupRequest(AsyncWebServerRequest *request)
+{
+  (void)request;
+}
+
+// POST /api/chain/setup: the body, a piece at a time, gathered by parseJSON and then handed to chainSetupIncoming
+static void chainSetupBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+{
+  parseJSON(request, data, len, index, total, chainSetupIncoming);
+}
+
+// POST /api/chain/setup - 0.38.7: First Boot's "Set Up the Other Gauges the Same". The body is what the other gauges
+// get (the web UI leaves out what each gauge keeps its own); saved, then sent to each one over ESP-NOW. This gauge's
+// own start page goes by its place in the row, as theirs do.
+static void chainSetupIncoming(AsyncWebServerRequest *request, const String &body)
+{
+  JsonDocument doc(psramJsonAllocator());
+  bool written = false;
+  File file = LittleFS.open(CHAIN_SETUP_FILE, "w");
+  if (file)
+  {
+    written = file.print(body) == body.length();
+    file.close();
+  }
+  if (!written)
+  {
+    doc["error"] = "couldn't save the setup (is the gauge's storage full?)";
+    sendJSON(request, 507, doc);
+    return;
+  }
+  chainSetupStartPage();
+  String reason;
+  if (!chainSetupStart(reason))
+  {
+    doc["error"] = reason;
+    sendJSON(request, 409, doc);
+    return;
+  }
+  doc["status"] = reason;
+  sendJSON(request, 200, doc);
 }
 
 // GET /api/kline/block - K-line mode: the module session and the block showing. Polling it keeps the session open (the
@@ -1815,6 +1916,8 @@ static void klineBlockOutgoing(AsyncWebServerRequest *request)
   doc["labelFile"] = browse.labelFile;
   doc["title"] = browse.title;
   doc["text"] = browse.text; // 0.17.4: a text block (ME7 81 = VIN) instead of fields, "" = none
+  doc["obd"] = browse.isObd;  // 0.39.6: the engine didn't answer at 0x01: OBD-II at 0x33, "group" is a page of PIDs
+  doc["pages"] = browse.obdPageCount;
   JsonArray labelCandidatesArr = doc["labelCands"].to<JsonArray>();
   for (uint8_t i = 0; i < browse.labelCandidateCount && i < LBL_MAX_CANDS; i++)
   {
@@ -1827,7 +1930,14 @@ static void klineBlockOutgoing(AsyncWebServerRequest *request)
     fieldObj["formula"] = browse.formula[i];
     fieldObj["a"] = browse.a[i];
     fieldObj["b"] = browse.b[i];
-    fieldObj["value"] = serialized(String(browse.value[i], 2));
+    if (isnan(browse.value[i]))
+    {
+      fieldObj["value"] = "--"; // OBD-II: the ECU didn't answer that PID ("nan" would break the JSON)
+    }
+    else
+    {
+      fieldObj["value"] = serialized(String(browse.value[i], 2));
+    }
     fieldObj["unit"] = browse.unit[i];
     fieldObj["name"] = browse.fieldName[i];
     fieldObj["spec"] = browse.fieldSpec[i];
@@ -2375,12 +2485,19 @@ static void canRecentOutgoing(AsyncWebServerRequest *request)
   for (uint8_t i = 0; i < frameCount; i++)
   {
     JsonObject frameObj = framesArr.add<JsonObject>();
-    char id[8], data[32];
+    char id[12];   // up to 8 hex digits (a 29-bit id) and the end
+    char data[32]; // 8 bytes as "XX " and the end
     snprintf(id, sizeof(id), "%03lX", (unsigned long)log[i].id);
-    int dataLen = 0;
-    for (uint8_t byteIndex = 0; byteIndex < log[i].len; byteIndex++)
+    data[0] = '\0'; // a frame with no data bytes shows as empty
+    size_t dataLen = 0;
+    uint8_t byteCount = log[i].len;
+    if (byteCount > 8)
     {
-      dataLen += snprintf(data + dataLen, sizeof(data) - dataLen, "%02X ", log[i].data[byteIndex]);
+      byteCount = 8; // a classic CAN frame carries 8 at most (the length code can say up to 15)
+    }
+    for (uint8_t byteIndex = 0; byteIndex < byteCount; byteIndex++)
+    {
+      appendf(data, sizeof(data), dataLen, "%02X ", log[i].data[byteIndex]);
     }
     frameObj["id"] = id;
     frameObj["data"] = data;
@@ -2510,13 +2627,22 @@ static void actionIncoming(AsyncWebServerRequest *request, const String &body)
   if (!strcmp(action, "reboot"))
   {
     sendOk(request, "rebooting");
+    if (settingsDirty)
+    {
+      writeEEP(); // 0.39.7: a change not saved yet (the house task saves every 2 s) isn't lost - the glass's Reboot did this
+    }
     delay(200);
     ESP.restart();
   }
   else if (!strcmp(action, "factoryReset"))
   {
     setDefaults(settings);
+    sharedSettingsRev = 0; // like a new gauge: it takes the chain's shared settings rather than pushing its defaults
     writeEEP();
+    // 0.39.7: like a new gauge, it knows no car: My Car (kept apart from the settings) and the last car scan go too.
+    // Before, a car saved earlier (a BMW tried on the bench) came back after the reset and won over the VIN read.
+    vehicleForgetCar();
+    LittleFS.remove("/car/values.json");
     firstBootSetState(FIRSTBOOT_ASK); // like a new gauge: the glass asks to set it up after the reboot
     sendOk(request, "defaults restored - rebooting");
     delay(200);
@@ -2763,6 +2889,10 @@ static void actionIncoming(AsyncWebServerRequest *request, const String &body)
   { // {"action":"output","channel":n,"state":0|1|2}
     int channel = doc["channel"] | 0;
     int state = doc["state"] | 2;
+    if (state < 0 || state > 2)
+    {
+      state = 2; // not a state: auto
+    }
     if (channel >= 0 && channel < IOX_CHANNELS)
     {
       settings.outputManual[channel] = state;
@@ -2969,7 +3099,7 @@ static void actionIncoming(AsyncWebServerRequest *request, const String &body)
     linkShowNumbers(false);
     sendOk(request, "numbers hidden");
   }
-  else if (!strcmp(action, "chainUpdate")) // 0.25.0: send this gauge's firmware + web files to the other gauges
+  else if (!strcmp(action, "chainUpdate")) // Update All Gauges: the newest firmware in the chain to every gauge
   {
     String reason;
     chainUpdateStart(reason);
@@ -3222,7 +3352,23 @@ static void filesOutgoing(AsyncWebServerRequest *request)
   sendJSON(request, 200, doc);
 }
 
-static File uploadFile;
+static File uploadFile;          // the upload being written
+static String uploadPath;        // where it goes once it's all in
+static bool uploadFailed = false; // the file couldn't be opened or a write fell short
+
+// the reply once the upload is in: an error if it couldn't be written (the filesystem full ...)
+static void filesUploadDone(AsyncWebServerRequest *request)
+{
+  if (uploadFailed)
+  {
+    JsonDocument doc(psramJsonAllocator());
+    doc["error"] = "couldn't write the file (is the gauge's storage full?)";
+    sendJSON(request, 507, doc);
+    return;
+  }
+  sendOk(request, "uploaded");
+}
+
 static void filesUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
 {
   if (index == 0)
@@ -3249,17 +3395,35 @@ static void filesUpload(AsyncWebServerRequest *request, String filename, size_t 
       LittleFS.mkdir(dir);
     }
     String path = dir + (dir.endsWith("/") ? "" : "/") + filename;
-    uploadFile = LittleFS.open(path, "w");
+    uploadPath = path;
+    // written beside the old file first, so a failed upload leaves the old one as it was
+    uploadFile = LittleFS.open(path + ".part", "w");
+    uploadFailed = !uploadFile;
     DEBUG("upload -> %s", path.c_str());
   }
   if (uploadFile && len)
   {
-    uploadFile.write(data, len);
+    if (uploadFile.write(data, len) != len)
+    {
+      uploadFailed = true; // the filesystem is full
+    }
   }
-  if (final && uploadFile)
+  if (final)
   {
-    uploadFile.close();
-    fsUsageChanged(); // 0.17.4: the space used changed
+    if (uploadFile)
+    {
+      uploadFile.close();
+    }
+    if (uploadFailed)
+    {
+      LittleFS.remove(uploadPath + ".part");
+    }
+    else
+    {
+      LittleFS.remove(uploadPath);
+      LittleFS.rename(uploadPath + ".part", uploadPath);
+    }
+    fsUsageChanged(); // the space used changed
   }
 }
 
@@ -3674,6 +3838,7 @@ bool apiConsoleRequest(const char *method, const char *path, const String &body)
 
 void setupWebServer()
 {
+  settingsApplyMutex = xSemaphoreCreateMutex(); // 0.38.7: before any route can save settings
   // LittleFS is mounted (guarded) at the top of setup(); never formatted here - a broken image gets the recovery page
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -3722,12 +3887,12 @@ void setupWebServer()
   webServer.on("/api/elm/action", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
                { parseJSON(request, data, len, index, total, elmActionIncoming); });
   webServer.on("/api/chain", HTTP_GET, chainOutgoing);
+  webServer.on("/api/chain/setup", HTTP_POST, chainSetupRequest, NULL, chainSetupBody); // 0.38.7: First Boot's setup to the other gauges
   webServer.on("/api/haldex", HTTP_GET, haldexOutgoing);
+  webServer.on("/api/ecu/library", HTTP_GET, ecuLibraryOutgoing); // before /api/ecu, which would match it too
   webServer.on("/api/ecu", HTTP_GET, ecuOutgoing);
-  webServer.on("/api/ecu/library", HTTP_GET, ecuLibraryOutgoing);
   webServer.on("/api/files", HTTP_GET, filesOutgoing);
-  webServer.on("/api/files/upload", HTTP_POST, [](AsyncWebServerRequest *request)
-               { sendOk(request, "uploaded"); }, filesUpload);
+  webServer.on("/api/files/upload", HTTP_POST, filesUploadDone, filesUpload);
   webServer.on("/api/files/delete", HTTP_POST, filesDelete); // refuses the web UI's own files (0.14.0)
   webServer.on("/download", HTTP_GET, [](AsyncWebServerRequest *request)
                {

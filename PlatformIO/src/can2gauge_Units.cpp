@@ -1,13 +1,22 @@
+// Units - a unit per quantity (speed, boost, other pressures, temperature, mixture, distance): see can2gauge_Units.h.
+
 #include <can2gauge_Units.h>
 #include <math.h> // powf / log10f / floorf for the rounding
 
-// conversion factors
-#define KMH_TO_MPH 0.621371f   // 1 km/h in mph
-#define KM_TO_MILES 0.621371f  // 1 km in miles
-#define BAR_TO_PSI 14.5038f    // 1 bar in psi
-#define BAR_TO_KPA 100.0f      // 1 bar in kPa
-#define AFR_STOICH 14.7f       // petrol: lambda 1.0 = 14.7 AFR
+// ===== Conversion factors =====
+#define KMH_TO_MPH 0.621371f  // 1 km/h in mph
+#define KM_TO_MILES 0.621371f // 1 km in miles
+#define BAR_TO_PSI 14.5038f   // 1 bar in psi
+#define BAR_TO_KPA 100.0f     // 1 bar in kPa
+#define AFR_STOICH 14.7f      // petrol: lambda 1.0 = 14.7 AFR
 
+// ===== Functions in this file =====
+static float roundToStep(float value, float span);                      // a converted range end rounded to a sensible step
+static uint8_t decimalsFor(uint8_t row, uint8_t choice, signalId_t id); // how many decimals a page shows in its new unit
+
+// ===== The unit choices =====
+
+// the six rows' choices in a settings copy, by row number
 UnitChoices unitsOf(const Settings &from)
 {
   UnitChoices choices;
@@ -21,6 +30,7 @@ UnitChoices unitsOf(const Settings &from)
   return choices;
 }
 
+// the quick choice: Metric or Imperial sets every row at once (and settings.units)
 void unitsSetQuick(uint8_t quick)
 {
   uint8_t choice = UNIT_METRIC;
@@ -41,6 +51,7 @@ void unitsSetQuick(uint8_t quick)
   }
 }
 
+// the quick choice the rows add up to: Metric / Imperial if they all match it, else Custom
 uint8_t unitsQuickFromRows()
 {
   const bool allMetric = settings.unitSpeed == UNIT_METRIC && settings.unitBoost == UNIT_METRIC &&
@@ -60,7 +71,8 @@ uint8_t unitsQuickFromRows()
   return UNITS_CUSTOM;
 }
 
-void unitsSanitize(Settings &target)
+// a saved or sent choice out of range goes back to metric (the settings check calls this)
+void unitsSanitise(Settings &target)
 {
   if (target.units > UNITS_CUSTOM)
   {
@@ -92,6 +104,9 @@ void unitsSanitize(Settings &target)
   }
 }
 
+// ===== Converting values =====
+
+// which row a signal belongs to, by its stored unit (UNIT_ROW_NONE = never converted)
 uint8_t unitRowOf(signalId_t id)
 {
   if (id == SIG_NONE)
@@ -130,6 +145,7 @@ uint8_t unitRowOf(signalId_t id)
   return UNIT_ROW_NONE;
 }
 
+// a stored (metric) value as it's shown with these choices; unitOut (if not NULL) gets the unit it's shown in
 float unitShow(signalId_t id, float storedValue, const UnitChoices &choices, const char **unitOut)
 {
   const char *storedUnit = signalUnit(id);
@@ -193,11 +209,12 @@ float unitShow(signalId_t id, float storedValue, const UnitChoices &choices, con
   }
   if (unitOut)
   {
-    *unitOut = unit;
+    *unitOut = unit; // hand the unit back to the caller
   }
   return value;
 }
 
+// the other way round: a value typed in the shown unit, back to the stored (metric) unit
 float unitStore(signalId_t id, float shownValue, const UnitChoices &choices)
 {
   const char *storedUnit = signalUnit(id);
@@ -253,6 +270,63 @@ float unitStore(signalId_t id, float shownValue, const UnitChoices &choices)
   return shownValue;
 }
 
+// a value shown in another unit than it's stored in: the decimals that unit shows. false = shown as stored.
+bool unitsConvertedDecimals(signalId_t id, uint8_t &decimals)
+{
+  const uint8_t row = unitRowOf(id);
+  if (row == UNIT_ROW_NONE)
+  {
+    return false; // never converted (rpm, %, V ...)
+  }
+  const UnitChoices now = unitsOf(settings);
+  if (now.choice[row] == UNIT_METRIC)
+  {
+    return false; // shown in the unit it's stored in
+  }
+  decimals = decimalsFor(row, now.choice[row], id);
+  return true;
+}
+
+// after a unit change: every page's Min / Max / Redline (and decimals) turned from the old choices into today's
+void unitsConvertPages(const UnitChoices &before)
+{
+  const UnitChoices now = unitsOf(settings);
+  for (uint8_t pageIndex = 0; pageIndex < MAX_PAGES; pageIndex++)
+  {
+    GaugePageCfg &page = settings.pages[pageIndex];
+    const signalId_t id = (signalId_t)page.signal;
+    const uint8_t row = unitRowOf(id);
+    if (row == UNIT_ROW_NONE || before.choice[row] == now.choice[row])
+    {
+      continue; // not a converted quantity, or its unit didn't change
+    }
+    const bool hasRedline = page.redline > page.minVal; // a redline at or below Min means "none"
+    // each end: shown in the old unit -> stored (metric) -> shown in the new unit
+    float newMin = unitShow(id, unitStore(id, page.minVal, before), now, NULL);
+    float newMax = unitShow(id, unitStore(id, page.maxVal, before), now, NULL);
+    float newRedline = unitShow(id, unitStore(id, page.redline, before), now, NULL);
+    const float span = fabsf(newMax - newMin);
+    newMin = roundToStep(newMin, span);
+    newMax = roundToStep(newMax, span);
+    newRedline = roundToStep(newRedline, span);
+    page.minVal = newMin;
+    page.maxVal = newMax;
+    if (hasRedline)
+    {
+      page.redline = newRedline;
+    }
+    else
+    {
+      page.redline = newMin; // still "none"
+    }
+    page.decimals = decimalsFor(row, now.choice[row], id);
+    DEBUG("Units: page %u now %.2f .. %.2f, redline %.2f", pageIndex + 1, page.minVal, page.maxVal, page.redline);
+  }
+  settingsDirty = true;
+}
+
+// ===== Detail functions =====
+
 // a converted range end rounded to a sensible step: a twentieth of the span's power of ten (280 km/h -> 174 mph ->
 // 175 with a step of 5; 1.6 bar -> 23.2 psi -> 23.0 with a step of 0.5)
 static float roundToStep(float value, float span)
@@ -295,57 +369,4 @@ static uint8_t decimalsFor(uint8_t row, uint8_t choice, signalId_t id)
   default:
     return 0; // speed, temperature, distance
   }
-}
-
-bool unitsConvertedDecimals(signalId_t id, uint8_t &decimals)
-{
-  const uint8_t row = unitRowOf(id);
-  if (row == UNIT_ROW_NONE)
-  {
-    return false; // never converted (rpm, %, V ...)
-  }
-  const UnitChoices now = unitsOf(settings);
-  if (now.choice[row] == UNIT_METRIC)
-  {
-    return false; // shown in the unit it's stored in
-  }
-  decimals = decimalsFor(row, now.choice[row], id);
-  return true;
-}
-
-void unitsConvertPages(const UnitChoices &before)
-{
-  const UnitChoices now = unitsOf(settings);
-  for (uint8_t pageIndex = 0; pageIndex < MAX_PAGES; pageIndex++)
-  {
-    GaugePageCfg &page = settings.pages[pageIndex];
-    const signalId_t id = (signalId_t)page.signal;
-    const uint8_t row = unitRowOf(id);
-    if (row == UNIT_ROW_NONE || before.choice[row] == now.choice[row])
-    {
-      continue; // not a converted quantity, or its unit didn't change
-    }
-    const bool hasRedline = page.redline > page.minVal; // a redline at or below Min means "none"
-    // each end: shown in the old unit -> stored (metric) -> shown in the new unit
-    float newMin = unitShow(id, unitStore(id, page.minVal, before), now, NULL);
-    float newMax = unitShow(id, unitStore(id, page.maxVal, before), now, NULL);
-    float newRedline = unitShow(id, unitStore(id, page.redline, before), now, NULL);
-    const float span = fabsf(newMax - newMin);
-    newMin = roundToStep(newMin, span);
-    newMax = roundToStep(newMax, span);
-    newRedline = roundToStep(newRedline, span);
-    page.minVal = newMin;
-    page.maxVal = newMax;
-    if (hasRedline)
-    {
-      page.redline = newRedline;
-    }
-    else
-    {
-      page.redline = newMin; // still "none"
-    }
-    page.decimals = decimalsFor(row, now.choice[row], id);
-    DEBUG("Units: page %u now %.2f .. %.2f, redline %.2f", pageIndex + 1, page.minVal, page.maxVal, page.redline);
-  }
-  settingsDirty = true;
 }

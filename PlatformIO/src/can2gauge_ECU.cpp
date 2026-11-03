@@ -180,7 +180,7 @@ static bool setCarSignal(signalId_t id, float value, uint32_t now)
     return false;
   }
   signalSetBus(id, value);
-  carWrote[id] = now | 1; // | 1: never 0, which means "never written"
+  carWrote[id] = millis() | 1; // after the write, so never earlier than the signal's own stamp; | 1: never 0 ("never written")
   return true;
 }
 
@@ -449,7 +449,8 @@ bool ecuNowWantsEspNow()
 bool ecuNowHeard()
 {
   uint32_t heardMs = lastPacketMs;
-  return settings.ecuWireless && heardMs != 0 && millis() - heardMs < ECU_HEARD_MS;
+  // signed: a packet stamped in the same millisecond (| 1) is a tiny negative age, not 4 billion ms ago
+  return settings.ecuWireless && heardMs != 0 && (int32_t)(millis() - heardMs) < ECU_HEARD_MS;
 }
 
 uint8_t ecuNowKind()
@@ -468,10 +469,11 @@ void ecuNowView(EcuNowView &view)
 
   portENTER_CRITICAL(&ecuMux);
   view.everHeard = lastPacketMs != 0;
-  view.heard = settings.ecuWireless && view.everHeard && now - lastPacketMs < ECU_HEARD_MS;
-  if (view.everHeard)
+  const int32_t ageMs = (int32_t)(now - lastPacketMs); // signed, as in ecuNowHeard
+  view.heard = settings.ecuWireless && view.everHeard && ageMs < ECU_HEARD_MS;
+  if (view.everHeard && ageMs > 0)
   {
-    view.ageMs = now - lastPacketMs;
+    view.ageMs = ageMs;
   }
   view.rssi = lastRssi;
   memcpy(view.mac, settings.ecuMac, 6);

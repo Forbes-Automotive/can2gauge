@@ -66,6 +66,9 @@ static bool klineModeOpen(uint8_t addr, char *id, size_t idLen);
 static bool klineModeConnected();
 static bool klineModeReadGroup(uint8_t group, Kwp1281Group &out);
 static void klineModeRelease(uint8_t addr);
+// 0.39.6: menu > K-line when the engine doesn't answer at 0x01: OBD-II at 0x33 (defined after runKwp2000, further down)
+static bool runKlineBrowseObd();
+static bool isBrowseObdFirst = false; // 0x01 didn't answer and 0x33 did last time: 0x33 is tried first next time
 
 // 0.17.3: one more sample read, and the samples per second the K-line tab and the glass show (runtime.me7SampleRate,
 // the name it had when only the ME7 logger filled it). Before, only the KWP2000 and ME7 loops worked the rate out, so
@@ -495,10 +498,20 @@ static void klineBrowseLabels(KlineBrowse &browse)
   labelsRemember(browse.addr, browse.labelFile, browse.ecuId);
 }
 
+// the module menu > K-line reads: settings.klineModeAddr, or the engine (0x01) when that is 0
+static uint8_t klineModeAddress()
+{
+  if (settings.klineModeAddr == 0)
+  {
+    return 0x01;
+  }
+  return settings.klineModeAddr;
+}
+
 static void runKlineBrowse()
 {
   KlineBrowse &browse = runtime.klineBrowse;
-  const uint8_t addr = settings.klineModeAddr ? settings.klineModeAddr : 0x01;
+  const uint8_t addr = klineModeAddress();
   runtime.klineUp = false;
   if (browse.addr != addr) // another module: start at its first block
   {
@@ -508,11 +521,17 @@ static void runKlineBrowse()
   browse.connected = false;
   browse.connecting = true;
   browse.searching = false;
+  browse.isObd = false;
   browse.fieldCount = 0;
   browse.ecuId[0] = '\0';
   if (browse.group == 0)
   {
     browse.group = 1;
+  }
+  // 0.39.6: an engine that only answered OBD-II at 0x33 last time is asked there first (no wait for 0x01 every time)
+  if (addr == 0x01 && isBrowseObdFirst && runKlineBrowseObd())
+  {
+    return;
   }
   setState("K-line mode: init");
   klineBrowseState("Waking module 0x%02X (5-baud init)", addr);
@@ -521,10 +540,28 @@ static void runKlineBrowse()
   {
     browse.connecting = false;
     browse.errors++;
+    // 0.39.6: the engine doesn't answer at 0x01 (not a VW, or one that only does OBD-II on the K-line): OBD-II at 0x33,
+    // the address First Boot and Scan My Car try too. Another module picked: it's that module or nothing.
+    if (addr == 0x01 && !isBrowseObdFirst && runKlineBrowseObd())
+    {
+      isBrowseObdFirst = true;
+      return;
+    }
     setState("K-line mode: no answer");
-    klineBrowseState("No answer from 0x%02X - retrying", addr);
+    if (addr == 0x01)
+    {
+      klineBrowseState("No answer at 0x01 or OBD-II 0x33 - retrying");
+    }
+    else
+    {
+      klineBrowseState("No answer from 0x%02X - retrying", addr);
+    }
     idleFor(3000, OWN_KLMODE);
     return;
+  }
+  if (addr == 0x01)
+  {
+    isBrowseObdFirst = false; // the engine answers at 0x01 now: its measuring blocks first again
   }
   copyStr(browse.ecuId, sizeof(browse.ecuId), id);
   copyStr(runtime.klineEcuId, sizeof(runtime.klineEcuId), id);
@@ -538,7 +575,7 @@ static void runKlineBrowse()
 
   int8_t direction = 1;
   uint16_t emptyBlocks = 0; // empty blocks in a row while searching
-  while (klineModeConnected() && wantedOwner() == OWN_KLMODE && !restartFlag && settings.klineModeAddr == addr)
+  while (klineModeConnected() && wantedOwner() == OWN_KLMODE && !restartFlag && klineModeAddress() == addr)
   {
     if (browse.gotoGroup >= 0)
     {
@@ -825,11 +862,7 @@ static uint8_t moduleWantedNow()
   }
   if (owner == OWN_KLMODE)
   {
-    if (settings.klineModeAddr)
-    {
-      return settings.klineModeAddr;
-    }
-    return 0x01;
+    return klineModeAddress();
   }
   if (owner == OWN_PAGE)
   {
@@ -892,12 +925,11 @@ static void kwp1281CloseOpen()
 // answer KWP2000 the second time, which measures faster than KWP1281. true = a KWP2000 session is up and keyBytes
 // holds its key bytes; false = nothing connected. Call from the K-line task (it owns the line). This is the CONNECT
 // half only - the KWP2000 measuring-block read path for generic K-line mode is the next part.
-bool kwp2000TryDoubleInit(uint8_t keyBytes[2])
+bool kwp2000TryDoubleInit(uint8_t keyBytes[2], char *id, size_t idLen)
 {
   kwp1281CloseOpen();             // make sure no other session holds the line
   vTaskDelay(pdMS_TO_TICKS(300)); // W5 idle
-  char id[48];
-  if (!kwp1281Connect(0x01, id, sizeof(id)))
+  if (!kwp1281Connect(0x01, id, idLen)) // the first, KWP1281, session gives the module's identification
   {
     return false; // the engine didn't answer the first (KWP1281) slow init
   }
@@ -921,10 +953,9 @@ static bool klineModeOpen(uint8_t addr, char *id, size_t idLen)
   if (settings.klineProtocol == KL_KWP2000VAG && addr == 0x01)
   {
     uint8_t keyBytes[2] = {0, 0};
-    if (kwp2000TryDoubleInit(keyBytes))
+    if (kwp2000TryDoubleInit(keyBytes, id, idLen))
     {
-      klineOnKwp2000 = true;
-      copyStr(id, idLen, "VAG KWP2000"); // the double-init path doesn't read the KWP1281 identification blocks
+      klineOnKwp2000 = true; // id holds the identification the first (KWP1281) session read
       return true;
     }
     DEBUG("K-line: KWP2000-VAG not available on 0x01 - using KWP1281");
@@ -946,7 +977,16 @@ static bool klineModeReadGroup(uint8_t group, Kwp1281Group &out)
 {
   if (klineOnKwp2000)
   {
-    return kwp2000ReadGroup(group, out);
+    if (kwp2000ReadGroup(group, out))
+    {
+      return true;
+    }
+    if (kwp2000LastNrc() != 0)
+    {
+      return true; // refused (7F 21 xx): the ECU has no such block - the session is fine, the block is empty
+    }
+    kwp2000Disconnect(); // no answer: the session is gone, so the callers connect again
+    return false;
   }
   return kwp1281ReadGroup(group, out);
 }
@@ -1288,7 +1328,7 @@ static void klineReadPidLists()
   {
     uint8_t data[8];
     uint8_t length = 0;
-    if (!kwp2000ReadPid(listPid, data, length) || length < 4)
+    if (!kwp2000ReadPid(listPid, data, sizeof(data), length) || length < 4)
     {
       break;
     }
@@ -1304,25 +1344,23 @@ static void klineReadPidLists()
   }
 }
 
-static void runKwp2000()
+// the KWP2000 / OBD-II session's address: where it last worked (0 = not found yet), and the address setting that was
+// for (a new setting starts the search again)
+static uint8_t kwp2000FoundAddress = 0;
+static uint8_t kwp2000FoundForSetting = 0;
+
+// wakes the ECU at one address and reads its PID lists and VIN. Fast init first, then the 5-baud address - many
+// 1999-2004 ECUs only wake for OBD that way (the bench ME7.5 answers 0x33 as ISO 9141-2). Whichever worked last time
+// goes first, so a reconnect doesn't wait for the other. true = a session is up; hasVin = the ECU gave its VIN.
+static bool kwp2000Open(uint8_t address, uint8_t keyBytes[2], uint32_t baud, bool &hasVin)
 {
-  setState("fast init");
-  uint8_t keyBytes[2];
-  // 0.17.4: only the rates the web UI offers. Anything else (the bench gauge had 10600 stored, typed in before the
-  // 0.17.3 drop-down) uses ISO 14230's 10400 - 2 % off is enough for the ECU to miss the StartCommunication
-  uint32_t baud = 10400;
-  if (settings.klineBaud == 9600 || settings.klineBaud == 4800)
-  {
-    baud = settings.klineBaud;
-  }
-  klSetBaud(baud);
-  const uint8_t address = settings.klineEcuAddr ? settings.klineEcuAddr : 0x33;
-  // 0.17.4: fast init first, then the 5-baud address - many 1999-2004 ECUs only wake for OBD that way (the bench ME7.5
-  // answers 0x33 as ISO 9141-2). Whichever worked last time goes first, so a reconnect doesn't wait for the other.
   static bool slowInitWorkedLast = false; // kept between sessions (static), false until a 5-baud wake-up has worked
+  hasVin = false;
   bool connected = false;
   if (!slowInitWorkedLast)
   {
+    setState("fast init");
+    klSetBaud(baud);
     connected = kwp2000Connect(address, true, keyBytes);
   }
   if (!connected)
@@ -1334,30 +1372,87 @@ static void runKwp2000()
   }
   if (!connected)
   {
+    return false;
+  }
+  kwp2000SetTiming(KWP_P3_STANDARD_MS, KWP_P4_STANDARD_MS);
+  klineReadPidLists();
+  // the VIN (mode 09 02), once a session: any make's car on the K-line, for Your Car and Scan My Car. Many pre-2005
+  // ECUs don't have mode 09; then this just finds nothing.
+  char vin[18];
+  if (kwp2000ReadObdVin(vin, sizeof(vin)) && vehicleVinValid(vin))
+  {
+    hasVin = true;
+    vehicleTakeVin(vin, VIN_SRC_KLINE, true); // true: a K-line car, the older of the two model years a VIN can mean
+    DEBUG("K-line: VIN %s (mode 09) at 0x%02X", vin, address);
+  }
+  return true;
+}
+
+static void runKwp2000()
+{
+  uint8_t keyBytes[2];
+  // 0.17.4: only the rates the web UI offers. Anything else (the bench gauge had 10600 stored, typed in before the
+  // 0.17.3 drop-down) uses ISO 14230's 10400 - 2 % off is enough for the ECU to miss the StartCommunication
+  uint32_t baud = 10400;
+  if (settings.klineBaud == 9600 || settings.klineBaud == 4800)
+  {
+    baud = settings.klineBaud;
+  }
+  uint8_t address = settings.klineEcuAddr;
+  if (address == 0)
+  {
+    address = KWP2000_OBD_ADDRESS; // 0 = the OBD-II address 0x33
+  }
+  if (kwp2000FoundForSetting != address)
+  {
+    kwp2000FoundForSetting = address; // the setting changed: look again
+    kwp2000FoundAddress = 0;
+  }
+  if (kwp2000FoundAddress != 0)
+  {
+    address = kwp2000FoundAddress; // found before: straight there
+  }
+  bool hasVin = false;
+  bool connected = kwp2000Open(address, keyBytes, baud, hasVin);
+  // no answer, or no VIN, at the address set (01 by default, the VW engine's KWP1281 address): the OBD-II address 0x33
+  // next, where most cars answer OBD. Nothing to type in: whichever works is kept for the reconnects.
+  if (!hasVin && kwp2000FoundAddress == 0 && address != KWP2000_OBD_ADDRESS)
+  {
+    DEBUG("K-line: no VIN at 0x%02X - trying the OBD-II address 0x33", address);
+    if (connected)
+    {
+      kwp2000Disconnect();
+    }
+    bool obdHasVin = false;
+    if (kwp2000Open(KWP2000_OBD_ADDRESS, keyBytes, baud, obdHasVin))
+    {
+      connected = true;
+      address = KWP2000_OBD_ADDRESS;
+    }
+    else if (connected)
+    {
+      connected = kwp2000Open(address, keyBytes, baud, hasVin); // 0x33 silent: back to the address that answered
+    }
+  }
+  if (!connected)
+  {
     backgroundNoEcu("no ECU");
     return;
   }
+  kwp2000FoundAddress = address;
   backgroundConnected();
   runtime.klineUp = true;
   if (kwp2000IsIso9141())
   {
-    snprintf(runtime.klineEcuId, sizeof(runtime.klineEcuId), "ISO 9141-2 kb %02X %02X", keyBytes[0], keyBytes[1]);
+    snprintf(runtime.klineEcuId, sizeof(runtime.klineEcuId), "ISO 9141-2 at %02X kb %02X %02X", address, keyBytes[0],
+             keyBytes[1]);
   }
   else
   {
-    snprintf(runtime.klineEcuId, sizeof(runtime.klineEcuId), "KWP2000 kb %02X %02X", keyBytes[0], keyBytes[1]);
+    snprintf(runtime.klineEcuId, sizeof(runtime.klineEcuId), "KWP2000 at %02X kb %02X %02X", address, keyBytes[0],
+             keyBytes[1]);
   }
   setState("KWP2000 up");
-  kwp2000SetTiming(KWP_P3_STANDARD_MS, KWP_P4_STANDARD_MS);
-  klineReadPidLists();
-  // 0.38.0: the VIN (mode 09 02), once a session: any make's car on the K-line, for Your Car and Scan My Car. Many
-  // pre-2005 ECUs don't have mode 09; then this just finds nothing.
-  char vin[18];
-  if (kwp2000ReadObdVin(vin, sizeof(vin)) && vehicleVinValid(vin))
-  {
-    vehicleTakeVin(vin, VIN_SRC_KLINE, true); // true: a K-line car, the older of the two model years a VIN can mean
-    DEBUG("K-line: VIN %s (mode 09)", vin);
-  }
   // the next request goes out as soon as the ECU's answer is in and P3 has passed (kwp2000Request waits out P3)
   bool fastTiming = false;      // Fast OBD timing in use
   bool fastGaveUp = false;      // the ECU missed answers with it: standard timing for the rest of this session
@@ -1383,7 +1478,7 @@ static void runKwp2000()
     obdSchedulePick(klineObdSchedule, &pid, 1); // K-line: one PID per request
     uint8_t data[8];
     uint8_t length = 0;
-    if (pid != 0 && kwp2000ReadPid(pid, data, length))
+    if (pid != 0 && kwp2000ReadPid(pid, data, sizeof(data), length))
     {
       lastOk = millis();
       missesInRow = 0;
@@ -1415,6 +1510,164 @@ static void runKwp2000()
   kwp2000SetTiming(0, KWP_P4_STANDARD_MS); // back to the library's own default for the other K-line jobs
   runtime.klineUp = false;
   setState("disconnected");
+}
+
+// 0.39.6: menu > K-line (and the K-line tab's live view) when the engine doesn't answer at 0x01: OBD-II at 0x33, any
+// make. The PIDs it has that the gauge knows are shown four to a page, the way a measuring block is (browse.group is
+// the page number, a swipe steps it); each answer also goes on the gauge's own values, as the OBD session does.
+// true = 0x33 answered (the session ran and has ended); false = no answer there either.
+#define BROWSE_OBD_PER_PAGE 4 // PIDs a page (the four fields of a block)
+static bool runKlineBrowseObd()
+{
+  KlineBrowse &browse = runtime.klineBrowse;
+  klineBrowseState("Trying OBD-II at 0x33");
+  uint8_t keyBytes[2];
+  bool hasVin = false;
+  if (!kwp2000Open(KWP2000_OBD_ADDRESS, keyBytes, 10400, hasVin)) // its PID lists are read into klineObdSchedule
+  {
+    return false;
+  }
+  // the PIDs it has that the gauge can show, in the table's order
+  uint8_t pidList[OBD_PID_COUNT];
+  uint8_t pidCount = 0;
+  for (uint8_t tableIndex = 0; tableIndex < OBD_PID_COUNT; tableIndex++)
+  {
+    ObdPidInfo info;
+    if (obdPidInfoAt(tableIndex, info) && obdScheduleSupports(klineObdSchedule, info.pid))
+    {
+      pidList[pidCount] = info.pid;
+      pidCount++;
+    }
+  }
+  browse.isObd = true;
+  browse.addr = KWP2000_OBD_ADDRESS;
+  browse.obdPageCount = (pidCount + BROWSE_OBD_PER_PAGE - 1) / BROWSE_OBD_PER_PAGE;
+  if (browse.group < 1 || browse.group > browse.obdPageCount)
+  {
+    browse.group = 1;
+  }
+  browse.connecting = false;
+  browse.connected = true;
+  browse.searching = false;
+  browse.text[0] = '\0';
+  browse.labelFile[0] = '\0'; // no label files for OBD-II: the names come from the PID table
+  browse.labelCandidateCount = 0;
+  if (kwp2000IsIso9141())
+  {
+    copyStr(browse.ecuId, sizeof(browse.ecuId), "OBD-II at 33 (ISO 9141-2)");
+  }
+  else
+  {
+    copyStr(browse.ecuId, sizeof(browse.ecuId), "OBD-II at 33 (KWP2000)");
+  }
+  copyStr(runtime.klineEcuId, sizeof(runtime.klineEcuId), browse.ecuId);
+  runtime.klineUp = true;
+  setState("K-line mode: OBD-II at 0x33");
+  klineBrowseState("Connected - OBD-II at 0x33");
+  DEBUG("K-line mode: 0x01 silent, OBD-II at 0x33 answered (%u PIDs to show)", pidCount);
+
+  uint32_t lastOkMs = millis();
+  bool isLost = false;
+  while (wantedOwner() == OWN_KLMODE && !restartFlag && klineModeAddress() == 0x01 && pidCount > 0)
+  {
+    // a page picked in the web UI, or a swipe
+    if (browse.gotoGroup >= 0)
+    {
+      browse.group = (uint8_t)browse.gotoGroup;
+      browse.gotoGroup = -1;
+      if (browse.group < 1 || browse.group > browse.obdPageCount)
+      {
+        browse.group = 1;
+      }
+      browse.fieldCount = 0;
+      browse.blockMs = 0;
+    }
+    if (browse.step)
+    {
+      int page = browse.group + browse.step; // wraps round at both ends
+      browse.step = 0;
+      if (page > browse.obdPageCount)
+      {
+        page = 1;
+      }
+      if (page < 1)
+      {
+        page = browse.obdPageCount;
+      }
+      browse.group = (uint8_t)page;
+      browse.fieldCount = 0;
+      browse.blockMs = 0;
+    }
+    browse.labelReload = false; // nothing to reload
+    // the page's PIDs, one request each
+    const uint8_t first = (browse.group - 1) * BROWSE_OBD_PER_PAGE;
+    uint8_t count = 0;
+    bool isAnswered = false;
+    for (uint8_t slot = 0; slot < BROWSE_OBD_PER_PAGE && first + slot < pidCount; slot++)
+    {
+      const uint8_t pid = pidList[first + slot];
+      ObdPidInfo info;
+      obdPidInfo(pid, info);
+      copyStr(browse.fieldName[slot], sizeof(browse.fieldName[slot]), info.name);
+      copyStr(browse.unit[slot], sizeof(browse.unit[slot]), info.unit);
+      browse.fieldSpec[slot][0] = '\0';
+      browse.formula[slot] = 0; // no KWP1281 formula / a / b bytes for a PID
+      browse.a[slot] = 0;
+      browse.b[slot] = 0;
+      uint8_t data[8];
+      uint8_t length = 0;
+      float value = NAN; // no answer: "--"
+      if (kwp2000ReadPid(pid, data, sizeof(data), length))
+      {
+        isAnswered = true;
+        lastOkMs = millis();
+        countSample();
+        obdDecodePid(pid, data, length, signalSet); // the gauge's own values too (pages with an OBD source, triggers)
+        obdPidValueOf(pid, data, length, value);
+      }
+      browse.value[slot] = value;
+      count++;
+    }
+    browse.fieldCount = count;
+    snprintf(browse.title, sizeof(browse.title), "OBD-II page %u of %u", browse.group, browse.obdPageCount);
+    browse.reads++;
+    if (isAnswered)
+    {
+      browse.blockMs = millis();
+      klineBrowseState("Connected - OBD-II page %u", browse.group);
+    }
+    if (millis() - lastOkMs > 3000)
+    {
+      browse.errors++;
+      isLost = true; // nothing answered for 3 s: the session has gone
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20)); // back-to-back reads keep the session alive
+  }
+  if (pidCount == 0)
+  {
+    klineBrowseState("OBD-II at 0x33: no PIDs the gauge knows");
+    idleFor(3000, OWN_KLMODE);
+  }
+  kwp2000SetTiming(KWP_P3_STANDARD_MS, KWP_P4_STANDARD_MS); // StopCommunication at standard timing
+  kwp2000Disconnect();
+  kwp2000SetTiming(0, KWP_P4_STANDARD_MS); // back to the library's own default for the other K-line jobs
+  browse.connected = false;
+  browse.connecting = false;
+  browse.isObd = false;
+  runtime.klineUp = false;
+  if (isLost && wantedOwner() == OWN_KLMODE)
+  {
+    setState("K-line mode: lost");
+    klineBrowseState("Connection lost - reconnecting");
+    idleFor(1000, OWN_KLMODE);
+  }
+  else
+  {
+    setState("K-line mode: closed");
+    klineBrowseState("Closed");
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -2026,18 +2279,19 @@ void me7StopLogging()
 
 void klineInfoProvider(char *buf, size_t len)
 {
-  static const char *names[] = {"off", "KWP1281", "KWP2000 / OBD", "ME7 logger"};
+  static const char *names[] = {"off", "KWP1281", "KWP2000 / OBD", "ME7 logger", "KWP2000 VAG"}; // klineProtocol_t order
   if (runtime.oil.connecting || runtime.oil.connected)
   { // the oil page has the line (oil source = K-line)
     snprintf(buf, len, "oil: cluster 0x%02X\n%s\n%s\n\nreads %lu  errors %lu\n\n%s resumes when\nthe oil page is left",
              settings.oilClusterAddr, runtime.oil.state, runtime.oil.clusterId, (unsigned long)runtime.oil.reads,
-             (unsigned long)runtime.oil.errors, names[settings.klineProtocol < 4 ? settings.klineProtocol : 0]);
+             (unsigned long)runtime.oil.errors, names[settings.klineProtocol < klineProtocol_t_MAX ? settings.klineProtocol : 0]);
     return;
   }
   size_t written = 0;
-  appendf(buf, len, written, "%s\n%s\n%s\n\nsamples %lu", names[settings.klineProtocol < 4 ? settings.klineProtocol : 0],
+  appendf(buf, len, written, "%s\n%s\n%s\n\nsamples %lu", names[settings.klineProtocol < klineProtocol_t_MAX ? settings.klineProtocol : 0],
           runtime.klineState, runtime.klineEcuId, (unsigned long)runtime.klineSamples);
-  if (settings.klineProtocol == KL_KWP2000 || settings.klineProtocol == KL_KWP1281)
+  if (settings.klineProtocol == KL_KWP2000 || settings.klineProtocol == KL_KWP1281 ||
+      settings.klineProtocol == KL_KWP2000VAG)
   {
     appendf(buf, len, written, "  %lu/s", (unsigned long)runtime.me7SampleRate); // answers per second (0.17.3: KWP1281 too)
   }

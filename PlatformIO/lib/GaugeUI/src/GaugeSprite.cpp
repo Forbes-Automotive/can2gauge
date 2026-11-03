@@ -539,7 +539,7 @@ Sprite *spriteOpenEx(lv_obj_t *parent, const char *name, bool half)
   const bool layered = header.flags & C2GS_LAYERED;
   const bool alpha = !layered && (header.flags & C2GS_ALPHA);
   sprite->half = half && layered; // a baked pack has no half-size decode: it shows full size
-  if (sprite->half)
+  if (ok && sprite->half) // ok: a pack that failed to open has no clip table to read
   {
     outPixels = 0;
     for (uint8_t clipIndex = 0; clipIndex < header.clipCount; clipIndex++)
@@ -1499,7 +1499,11 @@ void spriteUpdate(Sprite *sprite, const SpriteContext &ctx)
   if (state.cond == C2GS_PERMILLE && state.role == C2GS_MOOD && ctx.valid) // quicker toward the top of the band
   {
     const int32_t permille = permilleOf(ctx.value, ctx.minVal, ctx.maxVal);
-    const int32_t span = state.hi > state.lo ? (int32_t)(state.hi - state.lo) : 1;
+    int32_t span = (int32_t)(state.hi - state.lo);
+    if (span < 1)
+    {
+      span = 1; // a band narrower than 1 (999.5 .. 1000) would divide by zero below
+    }
     int32_t bandPos = (permille - (int32_t)state.lo) * 256 / span;
     if (bandPos < 0)
     {

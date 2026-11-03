@@ -21,7 +21,7 @@ UI, PCB and enclosure are all open source.
 ![can2gauge web UI: OEM oil, DSG, ADC expander, triggers, output, ME7, daisy chain and boot logos](images/can2gaugeUI-2.png)
 
 > [!NOTE]
-> **Status (firmware 0.38.2, not yet released; board V3.4 "V1.0").** The board is routed and reviewed and the
+> **Status (firmware 0.39.7, not yet released; board V3.4 "V1.0").** The board is routed and reviewed and the
 > firmware is feature complete for a first release. Some paths still need their first test on a real car: see
 > [Status and Bench Items](#status-and-bench-items).
 
@@ -61,7 +61,7 @@ UI, PCB and enclosure are all open source.
 | K-line | KWP1281, **KWP2000 VAG**, KWP2000 / OBD-II (with **Fast OBD**), an **ME7 logger** (~34/s, or ~50/s **Fast**) and a read-only **ME7 flash dump** |
 | Block labels | Field names, block titles and specs for **501 modules**, picked by part number |
 | OBD dongles | ELM327-type over **Bluetooth LE or WiFi**: VIN, every standard PID, the car's **CAN broadcast**, VW **TP2.0**, and **UDS to any module** on 11 or 29-bit CAN |
-| Scan My Car | One button finds every value the car can show (OBD PIDs, UDS values from each module, VW measuring blocks over TP2.0 or the K-line, **OBD-II over the K-line on any make**) and lists them as the **Car** source |
+| Scan My Car | One button finds every value the car can show (OBD PIDs, UDS values from each module, VW measuring blocks over TP2.0 or the K-line, **OBD-II over the K-line on any make**), with **Add to Gauge** on each and a **Suggested Gauges** set from every module |
 | Diagnostics | Up to 32 measuring values from any modules, any make (UDS, or TP2.0 on VW), over CAN **or the dongle**, with a **DID library** of 21 car groups |
 | OpenHaldex | Lock / target / mode over CAN **or WiFi**, mode change from the screen, full status in the web UI |
 | Gearbox | DSG and **ZF 8HP** (Audi / VW and BMW): selector, gear, lock-up, input speed, temperature |
@@ -199,25 +199,29 @@ to its main value, never take them away.
 ### The Menu
 
 Hold the screen for 2 s (or swipe up / down) for the menu: one item per screen with an icon and a **live status**.
-Swipe for the next, tap to open, hold or wait 10 s to go back. Settings > Device > Menu and Tabs hides any item (and
-its web UI tab).
+Swipe for the next, tap to open, hold or wait 10 s to go back. The items are the Settings > Device > Menu and Tabs
+switches, in the same order: Gauges, Navigation, CAN Bus, Haldex, ADC, usb2ip, K-Line, Oil, Gearbox, Bluetooth OBD,
+Triggers, Daisy Chain, Output and Drag Timer, then Settings. A switch off hides the item and its web
+UI tab together.
 
 <p align="center">
-  <img src="images/glass-menu.gif" alt="The mode menu: Gauges, Haldex, CAN bus, K-line, Output / Illumination, Gearbox, ADC, Bluetooth OBD, Daisy chain, Drag Timer, Settings" width="300">
+  <img src="images/glass-menu.gif" alt="The mode menu: Gauges, Navigation, CAN bus, Haldex, ADC, usb2ip, K-line, Oil, Gearbox, Bluetooth OBD, Triggers, Daisy chain, Output, Drag Timer, Settings" width="300">
 </p>
 
 ### Mode Screens
 
 Behind each menu item is a live screen. Opening one claims its source (the K-line, Bluetooth), released 3 s after
-you leave.
+you leave. **Navigation** shows the phone link (phone, route, next turn, last update) with **Off**, **Pop Up** and
+**Route** buttons (tap one, or swipe). **usb2ip** shows the link, then the ECU's values; **Oil** the cluster's oil
+temperature and level; **Triggers** each trigger, fired or what it reads now.
 
-![The mode screens: menu, Haldex, CAN bus, K-line, Bluetooth OBD, Gearbox, ADC, Output / Illumination, Daisy chain, Settings](images/glass-modes.png)
+![The mode screens: menu, Navigation, CAN bus, Haldex, ADC, usb2ip, K-line, Oil, Gearbox, Bluetooth OBD, Triggers, Daisy chain, Output, Settings](images/glass-modes.png)
 
 | Screen | What it does |
 |---|---|
 | **Haldex** | The Haldex gauge; **swipe to change the OpenHaldex mode** |
 | **CAN bus** | Every ID on the bus, decoded with the car's DBC, or the raw bytes with changes lit |
-| **K-line** | Wakes the module picked in the web UI, then one measuring block at a time; swipe for the next |
+| **K-line** | Wakes the module picked in the web UI, then one measuring block at a time (or OBD-II at 33 when the engine doesn't answer at 01); swipe for the next |
 | **Bluetooth OBD** | Connects to the paired adapter, then pages of live PIDs |
 | **Gearbox** | Selector and gear full screen, speed, temperature and lock-up |
 | **ADC** | The adc2can sensors, four to a page |
@@ -308,14 +312,16 @@ time, and a ring round the edge filling as the journey goes.
 - **The app**: **can2gauge Link** for Android reads the navigation notification Maps already shows and sends it over
   **Bluetooth LE**. Maps isn't changed and Android Auto isn't needed. Download it from
   **[can2gauge.com/app](https://can2gauge.com/app)** (Android 8.0+), and keep the app and the gauge on the same version.
-- **When it shows**: **pops up near a turn** (300 m by default) or for the **whole route**; a tap hides it until the
-  next turn.
+- **When it shows**: **pops up near a turn** (300 m by default) or for the **whole route**. A tap or a long press
+  goes back to the gauges: a pop-up comes back at the next turn, the whole route stays away until the route ends
+  (or Route is picked again). Pick the mode on the web UI's Navigation tab, or on the screen (menu > Navigation).
 - **Setup**: web UI > **Navigation** > switch **Nav Link** on; in the app allow notification access and Bluetooth,
   and set battery use to Unrestricted. It reconnects by itself at every ignition on. **Show Test Turn** tries the
   card with no phone.
 - In a daisy chain, switch Nav Link on in one gauge only. It runs alongside a Bluetooth OBD adapter: switched on while
   the adapter is in use, it starts after a restart (**Restart Now** on the Navigation tab).
 - Android only: iOS doesn't let apps read other apps' notifications.
+- Not using it? Switch **Navigation** off in Settings > Device > Menu and Tabs: the menu item and the tab go away.
 
 <p align="center">
   <img src="images/glass-nav.png" alt="The nav card: a right-turn arrow and 250 m on the accent band, Turn right onto Test Street, the arrival time" width="300">
@@ -344,8 +350,9 @@ the gauge's own.
   <img src="images/glass-rev.gif" alt="Rev on an rpm page during a pull: running with the revs, then a PSSH blow-off as the boost drops" width="300">
 </p>
 
-The **screensaver** (Settings > Logo & Sprites) brings Rev up once the car is still; **double-tap** it for **Rev
-Runner**, a little jump-the-cones game.
+The **screensaver** (Settings > Logo & Sprites) brings Rev up once the car is still, over whatever the screen shows
+(a gauge, a menu screen, the drag timer when it isn't timing), and goes back there after; **double-tap** it for
+**Rev Runner**, a little jump-the-cones game.
 
 ### Ignition on Permanent Power
 
@@ -382,9 +389,11 @@ Everything the gauge can show, trigger on or log is a **signal** in one catalogu
 
 - **Classic CAN**, 500 kbps by default.
 - **Profiles** (all listen-only unless noted):
-  - **VAG PQ**: rpm, pedal, coolant, outside temp, speed, fuel, gear and selector, oil temperature, oil-pressure warning.
-  - **VAG MQB**: rpm, speed, pedal, intake, coolant, fuel, outside temp, selector and gear, gearbox temperature,
-    shifting, lock-up and input speed.
+  - **VAG PQ**: rpm, pedal, coolant, outside temp, speed, fuel in the tank (litres), gear and selector, oil
+    temperature, oil-pressure warning.
+  - **VAG MQB**: rpm, speed, pedal, intake, coolant, fuel in the tank (litres), outside temp, selector and gear,
+    gearbox temperature, shifting, lock-up and input speed. The cars' own "no value" codes (sensor not fitted,
+    starting up, fault) show as no reading, not as a number.
   - **VAG MLB** (Audi A6 / A7 C7, A8 D4, Q5 8R with the ZF 8HP): much the same as MQB, on the drivetrain CAN.
   - **OBD-II** (asks): up to six PIDs per request, the next request the moment the last answer is in. See
     [OBD-II Polling](#obd-ii-polling).
@@ -409,11 +418,15 @@ An L9637D on J_OUT pin 2 (OBD pin 7).
 - **KWP1281**: the VAG measuring blocks with the full formula table. Text blocks show as text.
 - **KWP2000 VAG**: the same blocks, faster, falling back to KWP1281 by itself.
 - **K-line mode**: browse **any module**, one block at a time, on the screen or in the web UI. **Find...** jumps to a
-  value by name; **Show Formula and Spec** adds the formula and the spec under each one.
+  value by name; **Show Formula and Spec** adds the formula and the spec under each one. When the engine doesn't
+  answer at 01 (any make other than VW, or a car with only OBD-II on the K-line), it tries **OBD-II at 33** and shows
+  the engine's PIDs four to a page instead, a swipe for the next.
 - **Block labels**: field names and specs from the module's label file, picked by its part number (501 on the gauge).
 - **K-line pages**: one module stays connected for every page that uses it.
 - **KWP2000 / OBD-II**: fast init, falling back to the 5-baud wake-up for ISO 9141-2 ECUs; about 7-8 answers a second,
-  roughly twice that with **Fast OBD**. Any make: it also reads the **VIN** (mode 09) when the ECU has it, and
+  roughly twice that with **Fast OBD**. Any make: it also reads the **VIN** (mode 09) when the ECU has it. Nothing
+  answers at the address set (01 by default), or no VIN comes back, and it tries the OBD-II address **33** by itself,
+  keeping whichever works. Also
   [Service](#service) and [Scan My Car](#scan-my-car) use it for fault codes and values.
 - **ME7 logger**: fast logging for Bosch ME7. Upload the `.ecu` from ME7Info and tick the variables to log. **Normal**
   reads about 34 samples a second; **Fast** runs a tiny routine in the ECU's RAM (never the flash) for about 50.
@@ -431,6 +444,8 @@ A Bluetooth LE or WiFi **ELM327-type** adapter gives the gauge the car's data wi
   (CAN) first, the adapter's slower search through every protocol only if that gets no answer. An adapter that isn't there
   stops being looked for after 5 tries (about a minute on Bluetooth), until **Scan**, a settings change, the OBD
   screen being opened or the next ignition on.
+- **Paired once**: the adapter stays paired through updates (even one that resets the settings) and a backup
+  restore; only **Forget** or **Factory Reset** unpairs it.
 - **Adapter Source**: OBD PIDs (the usual), **VAG K-line measuring blocks** (set on the K-line tab, **K-line Through
   the OBD Adapter**), or **CAN broadcast** (the adapter just listens and the gauge decodes the frames).
 - **11-bit and 29-bit CAN**: on a 29-bit car (e.g. a 2025 Tiguan) the gauge finds the engine's address by itself.
@@ -440,7 +455,8 @@ A Bluetooth LE or WiFi **ELM327-type** adapter gives the gauge the car's data wi
   clone adapter manages about 5 requests a second (the protocol's limit); the gauge's own K-line does 8-15.
 - **Read / Clear DTCs**, and **UDS to any module** for [Diagnostics](#diagnostics-uds--tp20) and
   [Service](#service): the adapter switches between 11 and 29-bit for each module, with OBD values carrying on in between.
-- **Raw terminal**, **TP2.0 through the adapter** and **bench tests** for any new adapter.
+- **Raw terminal**, **TP2.0 through the adapter** and **bench tests** for any new adapter (the K-line test also tries
+  OBD-II at 33).
 
 ### OBD-II Polling
 
@@ -478,14 +494,17 @@ can2gauge started life as the OpenHaldex companion display.
 The **Scan My Car** tab (also in First Boot) asks the car what it can show, so nobody needs to know about
 PIDs, DIDs or measuring blocks. Ignition on; it takes from a few seconds to a few minutes:
 
-1. **The way in**: OBD on the gauge's own CAN wire (11 or 29-bit), else the OBD dongle (a Bluetooth adapter it finds
+1. **The way in**: OBD on the gauge's own CAN wire (11 or 29-bit, VW's own addresses too), else the OBD dongle (a Bluetooth adapter it finds
    is paired there and then, and the scan waits until it has found the car), else one quick wake-up of the engine on
    the K-line (skipped when First Boot or the K-line already found nothing). If nothing answers it stops and says **Connect an ECU** (or, when the car's CAN is busy but answers no
    questions, that its values are already under Live Now) rather than trying everything.
 2. **The car**: its make from the VIN picks the right part of the DID library. Until the make is known the scan is
    plain ISO (OBD), never a guess.
 3. **OBD PIDs from every ECU** that answers: the engine's, and the gearbox's (or any other's) own, read from that ECU.
-4. **Modules** that answer UDS (engine, gearbox, AWD, brakes ...; BMW's by name, DME, EGS, KOMBI ...), then each
+   They're listed as **Engine (OBD)**, **Gearbox (OBD)** ...
+4. **Modules** that answer UDS (engine, gearbox, AWD, brakes ...; BMW's by name, DME, EGS, KOMBI ...), listed as
+   **Engine (diagnostics)**, **Gearbox (diagnostics)** ... A VW on 29-bit OBD (the 2025 Tiguan) is asked at the
+   addresses its OBD answers on, so its engine and DSG lists are found there. Then each
    module's **DIDs** from the library: only the ones that answer with enough data are kept. BMW modules through a dongle
    need one that takes extended addressing (many cheap clones don't). A VW engine that answers like a **Simos 18**
    (EA888 gen 3 on MQB: Golf R / GTI, S3, TT ...) gets the Simos 18 list instead: 46 values (boost, AFR, knock per
@@ -498,11 +517,22 @@ PIDs, DIDs or measuring blocks. Ignition on; it takes from a few seconds to a fe
    OBD-II mode for those values (unless it's set to a VW protocol).
 
 The gauge's screen shows the scan as it goes (**SCANNING**, then **SCANNED** and the number of values; a red **NO WAY
-IN** when nothing answered), then fades. The result stays on the gauge and becomes the **Car** source on every page. A value from a module takes one of the 32
+IN** when nothing answered), then fades. The log ends with what came from where (Engine (OBD) 23, Gearbox
+(diagnostics) 41 ...). Then, two ways onto the gauge:
+
+- **Add to Gauge** beside any value (open a module to see its values): it goes on the first gauge that's switched off,
+  with a range from its unit. A value already on a gauge says which one.
+- **Suggested Gauges and Triggers**, under the scan: the same starter set First Boot makes (see
+  [First Boot Setup](#first-boot-setup)), then **Use These Gauges and Triggers** (they replace the gauges on the Gauges tab, and the
+  ticked triggers the ones on the Triggers tab).
+
+The result stays on the gauge and is the **Car** source on every page too. A value from a module takes one of the 32
 diagnostics slots by itself.
 
 <p align="center">
-  <img src="images/ui-carscan.png" alt="The Scan My Car tab after a scan of a Mk4: OBD and seven K-line modules, 299 values, and the scan's log" width="260">
+  <img src="images/ui-carscan.png" alt="The Scan My Car tab after a scan of a Mk4: OBD and seven K-line modules, 299 values with Add to Gauge, and the scan's log" width="260">
+  &nbsp;
+  <img src="images/ui-carscan-suggest.png" alt="Scan My Car's Suggested Gauges and Triggers from the scan" width="260">
   &nbsp;
   <img src="images/ui-gauges-car.png" alt="Gauges tab: gauge 1 on Source = Car showing oil temperature" width="260">
 </p>
@@ -592,7 +622,8 @@ Several gauges share one set of sources. The two bus plugs are wired straight th
 - Values go over **CAN** (once allowed) or **WiFi**. **Follow page** and **follow night** keep them in step.
 - **Shared settings**: ignition, shutdown, screensaver, theme, brightness, units and boot logo match on every gauge;
   change them on any one.
-- **Update Other Gauges**: update one gauge and it passes the update on (see [Updating](#updating)).
+- **Update All Gauges**: update one gauge, then press it on any gauge: the newest firmware goes to them all (see
+  [Updating](#updating)).
 
 <p align="center">
   <img src="images/glass-number.png" alt="Show Numbers: the gauge's number in the row, 2, big on its screen with its name and role" width="300">
@@ -721,20 +752,31 @@ A new gauge asks on the screen: **Set this gauge up from your phone?** **Yes** s
 UI then opens straight on its **First Boot** page (the rest loads behind it):
 
 1. **What is connected**: a tick or a cross for the CAN (and which car), OBD-II, OpenHaldex, adc2can, usb2ip, the
-   K-line, a Bluetooth or WiFi OBD adapter and other gauges. Have the ignition on. A Bluetooth adapter it finds is
+   K-line (a VW engine at 01, else OBD-II at 33 on any make), a Bluetooth or WiFi OBD adapter and other gauges. Have the ignition on. A Bluetooth adapter it finds is
    paired there and then, and the check waits until it has found the car (then the WiFi adapter row isn't needed).
 2. **Suggested setup**: one row per setting with the reason: CAN profile and the car's DBC, OBD, K-line, oil, termination,
    power, dimming, units, colours, boot logo, sprites, and which menu items and tabs to show.
-3. **Gauges**: a starter set, all ticked: only gauges the car can actually show, from what was found (OpenHaldex, the
-   OBD-II values, the K-line engine's measuring blocks, adc2can sensors). When there's a way in to the car, the car scan runs
-   as part of the checks and the list comes up with the values it found in other modules (oil temperature, gear, boost,
-   EGT, gearbox temperature ...). **Scan Again** if the car has changed. Untick or reorder any.
+3. **Gauges and Triggers**: a starter set of gauges, only ones the car can actually show, from every source the gauge
+   found: the engine (rpm, speed, oil temperature and pressure, coolant, boost, battery ...), the gearbox (DSG / ZF:
+   gear, its temperature and the clutch's), adc2can sensors (with the dial range and warning the adc2can has for them),
+   usb2ip (knock, injector duty, ethanol ...), OpenHaldex, and one from each other module the scan found. The 8 ticks
+   go first to one gauge from each source, then down the list. When there's a way in to the car, the car scan runs as
+   part of the checks. Under the gauges, **Triggers** for the values found: high revs, boost, coolant, oil, gearbox,
+   EGT, battery low / high, and the adc2can sensors' own warning limits. **Scan Again** if the car has changed. Untick
+   or reorder any. Scan My Car offers the same lists after its own scan.
 4. **Your car**: the car the VIN says it is, with its picture; check it and press **This Is My Car**.
 
 While the setup runs on the phone, the gauge's screen shows a **SETTING UP** ring with what it's doing (checking,
 scanning which module) and how far it has got, until **Apply** (it says **SET UP**) or **Skip**, then fades out.
 
 Nothing changes until **Apply**. **Settings > Device > First Boot Setup** runs it again.
+
+**Several gauges:** set up any one of them. With other gauges heard on the chain, **Set Up the Other Gauges the Same**
+(ticked) gives them the same gauges, triggers and car settings (and the car's scan and DBC) over WiFi when you press
+Apply, so it doesn't matter which gauge your phone joined. Each starts on its own page by its place in the row (the
+row's gauge 1 on the first page, gauge 2 on the second ...), and keeps its own WiFi, row number, name, CAN termination,
+OBD dongle, K-line and dash-light wire. Their screens show **SETTING UP**, then **SET UP**, and they stop asking to be
+set up. The gauges need the same firmware (Daisy Chain > **Update All Gauges** first).
 
 <p align="center">
   <img src="images/glass-firstboot-ask.png" alt="The screen on a new gauge: Welcome, set this gauge up from your phone? Not now / Yes" width="300">
@@ -747,7 +789,7 @@ Nothing changes until **Apply**. **Settings > Device > First Boot Setup** runs i
   &nbsp;
   <img src="images/ui-firstboot-setup.png" alt="First Boot: the suggested setup, one row per setting with the reason" width="260">
   &nbsp;
-  <img src="images/ui-firstboot-pages.png" alt="First Boot: the starter set of gauges, only ones the car can show" width="260">
+  <img src="images/ui-firstboot-pages.png" alt="First Boot: the starter set of gauges and triggers, only ones the car can show" width="260">
 </p>
 
 ### Your Car
@@ -789,9 +831,9 @@ back). Diagnostics and System show with **Advanced** on.
 | **Service** | [Fault codes](#service) with descriptions (OBD-II on any make over the K-line), **Scan Modules**, throttle body adaptation |
 | **Bluetooth OBD** | Connection, pairing, Fast OBD, supported PIDs, terminal, bench tests |
 | **Triggers** | The 8 set-points |
-| **Daisy Chain** | Gauge Numbers, follow options, the gauges heard, **Update Other Gauges** |
-| **Scan My Car** | Finds every value the car can show, listed by module with their readings; they become the **Car** source on the Gauges tab (modules first, then the gauge's own live values) |
-| **Settings** | **Display** (brightness, units, themes, gauge feel, rotation), **Logo & Sprites**, **Power & Wiring** (output, illumination, ignition), **WiFi**, **Device** (Your Car, Menu and Tabs, Advanced, Enable Other Scanners, backup, First Boot, factory reset) |
+| **Daisy Chain** | Gauge Numbers, follow options, the gauges heard, **Update All Gauges** |
+| **Scan My Car** | Finds every value the car can show, listed by module, each with **Add to Gauge**; **Suggested Gauges** from every module; all of it is the **Car** source on the Gauges tab too |
+| **Settings** | **Display** (brightness, units, themes, gauge feel, rotation), **Logo & Sprites**, **Power & Wiring** (output, illumination, ignition), **WiFi**, **Device** (Your Car, Menu and Tabs, Advanced, Enable Other Scanners, backup, First Boot, factory reset: the settings, My Car and the last car scan) |
 | **System** | Advanced. The gauge's own health: buses, links, power, memory, display and drawing |
 | **OTA** | Versions and updates |
 
@@ -851,7 +893,7 @@ back). Diagnostics and System show with **Advanced** on.
   &nbsp;
   <img src="images/ui-diag.png" alt="System: the gauge, communication and power blocks at a glance (Advanced)" width="260">
   &nbsp;
-  <img src="images/ui-chain-update.png" alt="Daisy Chain: Update Other Gauges, each gauge's version and how its update went" width="260">
+  <img src="images/ui-chain-update.png" alt="Daisy Chain: Update All Gauges, each gauge's version and how its update went" width="260">
 </p>
 
 <p align="center">
@@ -973,9 +1015,14 @@ U-bracket. Printable in PETG or ASA; the files and assembly notes are in [Enclos
 
 A new firmware has to confirm itself within 60 s or the gauge rolls back.
 
-**Gauge to gauge**: update one gauge, then press **Update Other Gauges** on its Daisy Chain tab. It updates the others
-over WiFi one at a time (about a minute each), sending only the files that differ; a power cut leaves a gauge on its
-old firmware. The car must be parked.
+> [!WARNING]
+> **0.39.0 and 0.39.2 put every setting back to its default** (the saved settings' layout changed). Before updating,
+> press **Download Backup** (Settings > Device); after the update, **Import Backup** puts them all back.
+
+**Gauge to gauge**: update one gauge, then press **Update All Gauges** on the Daisy Chain tab of any gauge (the one
+your phone is on will do). The gauge with the newest firmware updates the others over WiFi one at a time (about a
+minute each), sending only the files that differ; a file that arrives damaged is sent again; a power cut leaves a
+gauge on its old firmware. The car must be parked.
 
 ---
 
@@ -991,7 +1038,7 @@ Still to be checked on a real car or bench:
   oil level on a G266 car.
 - **CAN**: Kombi_2 oil temperature, the MQB gearbox speed read, and chain bus load.
 - **Daisy chain**: Gauge Numbers, the row wave, shared settings and ignition follow across three gauges; boot logos
-  in step; **Update Other Gauges** including a power cut half way. It works on the bench; still to check: no lines on
+  in step; **Update All Gauges** including a power cut half way. It works on the bench; still to check: no lines on
   the gauge being updated with the 12 MHz update clock (0.36.13), and the backlight going off before the restart.
 - **Radio**: WiFi range through the dash, and the AP, Bluetooth and WiFi links all at once.
 - **First Boot** and **Your car** on a real car.
@@ -1010,7 +1057,21 @@ Still to be checked on a real car or bench:
 - **Web UI first load**: app.js now goes zipped; First Boot opens before the rest has loaded.
 - **Diagnostics and Service**: UDS through the dongle on a 2025 Tiguan (29-bit), fault read / clear on K-line and CAN,
   and the throttle body adaptation on an ME7 1.8T.
+- **2025 Tiguan scan**: the engine and DSG found at 18 DA 01 / 02 F1 (OBD and diagnostics), their values on gauges,
+  Add to Gauge and Suggested Gauges.
+- **KWP2000 / OBD-II on 33 by itself** on a non-VW K-line car with the address left at 01, the K-line screen's OBD-II
+  pages (0.39.6), and the adapter's K-line bench test at 33.
+- **First Boot setting up the other gauges** (0.38.7): two or three new gauges in a row, set up from one; each on its
+  own start page, the others' First Boot questions gone.
+- **0.38.3 bug fixes** (docs/bug_review_2026-11-03.md): a deep-sleep wake on CAN, outputs and triggers through standby,
+  (the page rebuild during a screen animation: fixed in 0.38.8 and passed tools/diag/anim_rebuild_test.py on the
+  bench, 2026-11-03).
 - **Screen rotation** frame-rate cost, and **units** on the screen.
+- **The new menu items** (0.39.2): Navigation's Off / Pop Up / Route by a tap and by a swipe (the phone link starting
+  and stopping), the nav card's long press back to the gauges, Route staying away for the rest of a route; usb2ip, Oil
+  (the K-line cluster session opening from the menu) and Triggers on a car.
+- **Marks after the nav card**: two small marks on the left of the RPM dial after Show Test Turn, and the band colour
+  at the bottom of the card. tools/diag/screen_grab.py (USB) shows whether they're in the picture or only on the glass.
 
 ---
 

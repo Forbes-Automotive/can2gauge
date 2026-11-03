@@ -57,7 +57,7 @@ static void setCarSignal(signalId_t id, float value, uint32_t now)
     return;
   }
   signalSetBus(id, value);
-  carWrote[id] = now | 1;
+  carWrote[id] = millis() | 1; // after the write: never earlier than the signal's own time stamp (or we'd step aside from ourselves)
 }
 
 static void publishStatus(const OhxStatus &status, uint32_t now)
@@ -183,7 +183,8 @@ static void signCommand(OhxCommand &command)
 
 bool ohxHeard()
 {
-  return settings.ohxWireless && lastStatusMs && millis() - lastStatusMs < haldexTimeout;
+  // signed: a packet stamped in the same millisecond (| 1) is a tiny negative age, not 4 billion ms ago
+  return settings.ohxWireless && lastStatusMs && (int32_t)(millis() - lastStatusMs) < haldexTimeout;
 }
 
 bool ohxWantsEspNow()
@@ -324,8 +325,13 @@ void ohxView(OhxView &view)
   const uint32_t now = millis();
 
   portENTER_CRITICAL(&ohxMux);
-  view.heard = settings.ohxWireless && lastStatusMs && now - lastStatusMs < haldexTimeout;
-  view.ageMs = lastStatusMs ? now - lastStatusMs : 0;
+  const int32_t ageMs = (int32_t)(now - lastStatusMs); // signed, as in ohxHeard
+  view.heard = settings.ohxWireless && lastStatusMs && ageMs < haldexTimeout;
+  view.ageMs = 0;
+  if (lastStatusMs && ageMs > 0)
+  {
+    view.ageMs = ageMs;
+  }
   view.rssi = lastStatusRssi;
   memcpy(view.mac, settings.ohxMac, 6);
   if (lastStatusMs)

@@ -226,6 +226,7 @@ static uint16_t periodMs(signalId_t id)
   case SIG_IAT:
   case SIG_OIL_TEMP:
   case SIG_FUEL_LEVEL:
+  case SIG_FUEL_LITRES:
   case SIG_BATTERY:
   case SIG_GEARBOX_TEMP:
   case SIG_AMBIENT:
@@ -284,7 +285,10 @@ static bool isMasterCandidate(uint8_t flags)
 
 static bool isAlive(const LinkNode &node, uint32_t now, uint32_t timeoutMs = 3000)
 {
-  return node.lastSeen && now - node.lastSeen < timeoutMs;
+  // signed: a packet stamped just after `now` was taken (millis() | 1, or a moment later on another task) is a tiny
+  // negative age - alive - not 4 billion ms ago
+  const int32_t ageMs = (int32_t)(now - node.lastSeen);
+  return node.lastSeen && ageMs < (int32_t)timeoutMs;
 }
 
 static void noteNode(uint8_t node, uint8_t via)
@@ -940,8 +944,15 @@ static uint8_t sendData(uint32_t now)
     {
       owned++;
     }
-    if (espNowDue && count < NOW_MAX_SIGS && wantShare(id, false))
+    if (espNowDue && wantShare(id, false))
     {
+      if (count >= NOW_MAX_SIGS)
+      {
+        // the packet is full: send it and start the next, so every shared signal goes out (not just the first 40)
+        fillHeader(*header, NOW_DATA);
+        espNowSend(packet, sizeof(NowHeader) + 1 + count * sizeof(NowSignal));
+        count = 0;
+      }
       signals[count].sig = sigIndex;
       signals[count].flags = 0;
       signals[count].value = signalGet(id);
@@ -1259,7 +1270,7 @@ static void linkTask(void *)
     {
       espNowStart();
     }
-    stats.canHeard = canHeardMs && now - canHeardMs < 5000;
+    stats.canHeard = canHeardMs && (int32_t)(now - canHeardMs) < 5000; // signed, as in isAlive
 
     PendingCommand command;
     while (xQueueReceive(commandQueue, &command, 0) == pdTRUE)

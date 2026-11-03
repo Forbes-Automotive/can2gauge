@@ -1,17 +1,24 @@
+// ME7 fast logging (the B7 RAM routine): writes our routine into the ECU's RAM, hooks it, polls it and un-hooks it. See
+// can2gauge_ME7Fast.h for the whole story and the risk note. The C166 routines are our own clean-room code, assembled
+// offline and held below as HANDLER_V0 / HANDLER_V1. The ME7 logger (lib/ME7Logger) installs it when Fast is armed,
+// and the K-line task's fast-path bench check uses it too.
 #include <can2gauge_ME7Fast.h>
 #include <KLine.h>
 
-// ---------------------------------------------------------------------------
-// can2gauge ME7 fast logging (B7 RAM routine). See can2gauge_ME7Fast.h for the whole story and the risk note.
-// This file only writes/hooks/polls; the actual C166 routine is our own clean-room code, assembled offline and
-// embedded below as HANDLER_V0.
-//
-// NOTE (0.19.0, in progress): this module is not wired into the logger yet - it compiles as its own unit so it can
-// be built and reviewed before it ever touches a live ECU. v0's handler just writes the marker "C2G!".
-// ---------------------------------------------------------------------------
+// ===== Settings for this file =====
+#define HANDLER_OFFSET 0xC6         // the handler sits here inside the blob (the 198-byte table is 0..0xC5)
+#define ME7FAST_CONFIG_OFFSET 0x110 // the config block sits here (0x387B10); fixed, with headroom past the handler
 
-// The clean-room C166 handler, assembled with the Ghidra C166 module (tools/me7fast/b7_handler_v0.asm).
-// v0 TEST LINK: writes "C2G!" to the response buffer (R12+0..3) and returns length 4 via RL4, then rets.
+// the biggest blob: the config at its fixed offset, its count word, and up to ME7FAST_MAX_VARS entries of 4 bytes
+#define ME7FAST_BLOB_MAX (ME7FAST_CONFIG_OFFSET + 2 + ME7FAST_MAX_VARS * 4) // bytes
+
+// ===== Variables for this file =====
+static uint32_t fastPointer = ME7FAST_POINTER; // the ECU's mapping-table base pointer we hook (0xE228, EXTP; see the header)
+static Me7FastStatus fastStatus;               // where the install / hook stands (zero-filled at boot: M7F_IDLE, haveSaved false)
+
+// ===== The C166 routines (our own, assembled offline) =====
+// v0 TEST LINK, assembled with the Ghidra C166 module (tools/me7fast/b7_handler_v0.asm): writes "C2G!" to the response
+// buffer (R12+0..3) and returns length 4 in RL4, then rets.
 //   mov r5,r12 / (movb RL4,#c ; movb [r5],RL4 ; add r5,#1) x4 / movb RL4,#4 / rets
 static const uint8_t HANDLER_V0[] = {
     0xF0, 0x5C,             // mov r5,r12          ; cursor = buffer base
@@ -30,13 +37,12 @@ static const uint8_t HANDLER_V0[] = {
     0xDB, 0x00              // rets
 };
 
-// v1 FAST, CONFIG-DRIVEN. Reads the config block at a FIXED spot (0x387B10 = blob offset ME7FAST_CONFIG_OFFSET) -
-// [N word][N x {page16, off16}] - and for each entry reads the 2-byte value from page:off, appending it to the
+// v1 FAST, driven by its config block. Reads the config at a FIXED spot (0x387B10 = blob offset ME7FAST_CONFIG_OFFSET)
+// - [N word][N x {page16, off16}] - and for each entry reads the 2-byte value at page:off and adds it to the
 // response, in order. Returns N*2 in RL4. Assembled with the keyhana C166 module (docs §9.5).
-//
-// 0.19.0 FIX (docs §9.5): the value read is now TWO BYTE reads (movb RL4,[r2+] / movb RH4,[r2]), not one word read.
-// A word read on the C166 must be even-aligned; our byte-sized variables sit at ODD addresses (e.g. IntakeAirTemp
-// 0x380A2F), and a word read there traps the CPU - that was the crash. Byte reads have no alignment requirement.
+// Each value is read as TWO BYTE reads (movb RL4,[r2+] / movb RH4,[r2]), not one word read: a C166 word read must be
+// at an even address, our byte-sized variables sit at ODD addresses (e.g. IntakeAirTemp 0x380A2F), and a word read
+// there traps the CPU (the crash on the bench). Byte reads can be at any address.
 static const uint8_t HANDLER_V1[] = {
     0x88, 0x60, 0x88, 0x70, 0x88, 0x80, // push r6/r7/r8
     0xF0, 0x5C,                         // mov r5,r12          ; cursor = buffer base
@@ -53,111 +59,28 @@ static const uint8_t HANDLER_V1[] = {
     0xDB, 0x00                          // rets
 };
 
-#define HANDLER_OFFSET 0xC6     // the handler sits here inside the blob (the 198-byte table is 0..0xC5)
-#define ME7FAST_CONFIG_OFFSET 0x110 // the config block sits here (0x387B10); fixed, with headroom past the handler
-// Biggest blob: the config at its fixed offset + the count word + up to MAX_VARS entries of 4 bytes.
-#define ME7FAST_BLOB_MAX (ME7FAST_CONFIG_OFFSET + 2 + ME7FAST_MAX_VARS * 4)
-
-static Me7FastStatus fastStatus; // zero-initialised: state M7F_IDLE, haveSaved false
-static uint32_t fastPointer = ME7FAST_POINTER; // the mapping-table base pointer we hook (0xE228 EXTP; see the header)
-
+// ===== Small helpers =====
+// the status line the web UI / bench log shows
 static void setMessage(const char *message)
 {
   strncpy(fastStatus.message, message, sizeof(fastStatus.message) - 1);
   fastStatus.message[sizeof(fastStatus.message) - 1] = 0;
 }
 
+// something went wrong: the error state, with the reason
 static void fail(const char *message)
 {
   fastStatus.state = M7F_ERROR;
   setMessage(message);
 }
 
-// WriteMemoryByAddress (0x3D): write len bytes to a 24-bit address. true = ECU accepted (positive answer 0x7D).
-static bool fastWriteMem(uint32_t addr, const uint8_t *data, uint8_t len)
-{
-  uint8_t resp[16];
-  uint8_t respLen;
-  uint8_t req[5 + ME7FAST_CHUNK];
-  req[0] = 0x3D;
-  req[1] = (uint8_t)(addr >> 16); // address high byte
-  req[2] = (uint8_t)(addr >> 8);  // address middle byte
-  req[3] = (uint8_t)addr;         // address low byte
-  req[4] = len;                   // how many bytes follow
-  for (uint8_t i = 0; i < len; i++)
-  {
-    req[5 + i] = data[i];
-  }
-  if (!kwp2000Request(req, 5 + len, resp, respLen, 800, sizeof(resp)))
-  {
-    return false;
-  }
-  return respLen >= 1 && resp[0] == 0x7D;
-}
+// ===== Functions in this file =====
+static uint16_t buildBlob(uint8_t *buf, const uint32_t *varAddrs, uint8_t varCount); // the blob: pointer table, handler (+ config)
+static bool fastWriteMem(uint32_t addr, const uint8_t *data, uint8_t len);           // 0x3D WriteMemoryByAddress
+static int fastReadMem(uint32_t addr, uint8_t len, uint8_t *out, uint8_t cap);       // 0x23 ReadMemoryByAddress
 
-// ReadMemoryByAddress (0x23): read len bytes from a 24-bit address into out. Returns the byte count, or -1.
-static int fastReadMem(uint32_t addr, uint8_t len, uint8_t *out, uint8_t cap)
-{
-  uint8_t resp[160];
-  uint8_t respLen;
-  uint8_t req[5] = {0x23, (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr, len};
-  if (!kwp2000Request(req, 5, resp, respLen, 800, sizeof(resp)))
-  {
-    return -1;
-  }
-  if (respLen < 1 || resp[0] != 0x63)
-  {
-    return -1;
-  }
-  uint8_t count = respLen - 1; // first byte is the 0x63 positive-answer id
-  if (count > cap)
-  {
-    count = cap;
-  }
-  memcpy(out, resp + 1, count);
-  return count;
-}
-
-// Build the blob in buf and return its length. First a 198-byte table of the 4-byte far-pointer 0x00387AC6
-// (handler address, little-endian "C6 7A 38 00" repeated) so whatever sub-index the ECU computes lands on our
-// one handler. Then the handler: v0 marker (Test link) when varCount == 0, else v1 Fast followed by its config block
-// [N word][N x {page16, off16}] built from each variable's 24-bit address.
-static uint16_t buildBlob(uint8_t *buf, const uint32_t *varAddrs, uint8_t varCount)
-{
-  const uint32_t handlerAddr = ME7FAST_SCRATCH + HANDLER_OFFSET; // 0x387AC6
-  const uint8_t pattern[4] = {
-      (uint8_t)handlerAddr, (uint8_t)(handlerAddr >> 8), (uint8_t)(handlerAddr >> 16), 0x00};
-  for (uint16_t i = 0; i < HANDLER_OFFSET; i++)
-  {
-    buf[i] = pattern[i & 3];
-  }
-  if (varCount == 0)
-  {
-    memcpy(buf + HANDLER_OFFSET, HANDLER_V0, sizeof(HANDLER_V0)); // Test link marker
-    return HANDLER_OFFSET + (uint16_t)sizeof(HANDLER_V0);
-  }
-  // v1: the Fast handler, then its config block at the FIXED offset the handler reads (ME7FAST_CONFIG_OFFSET =
-  // 0x387B10). Zero the gap between the handler's end and the config so nothing stray sits there.
-  memcpy(buf + HANDLER_OFFSET, HANDLER_V1, sizeof(HANDLER_V1));
-  for (uint16_t i = HANDLER_OFFSET + (uint16_t)sizeof(HANDLER_V1); i < ME7FAST_CONFIG_OFFSET; i++)
-  {
-    buf[i] = 0x00;
-  }
-  uint16_t pos = ME7FAST_CONFIG_OFFSET;
-  buf[pos++] = varCount; // N, low byte
-  buf[pos++] = 0x00;     // N, high byte (count never exceeds 255)
-  for (uint8_t v = 0; v < varCount; v++)
-  {
-    const uint16_t page = (uint16_t)(varAddrs[v] >> 14);   // EXTP page = address / 0x4000
-    const uint16_t off = (uint16_t)(varAddrs[v] & 0x3FFF); // 14-bit offset within that page
-    buf[pos++] = (uint8_t)page;
-    buf[pos++] = (uint8_t)(page >> 8);
-    buf[pos++] = (uint8_t)off;
-    buf[pos++] = (uint8_t)(off >> 8);
-  }
-  return pos;
-}
-
+// Writes the routine blob into the ECU's RAM, checks it landed, saves the ECU's pointer and repoints it at the blob.
+// varCount 0 = the v0 Test link marker, more = v1 Fast reading those variables. true = installed + hooked.
 bool me7FastInstall(const uint32_t *varAddrs, uint8_t varCount)
 {
   if (varCount > ME7FAST_MAX_VARS)
@@ -167,10 +90,9 @@ bool me7FastInstall(const uint32_t *varAddrs, uint8_t varCount)
   memset(&fastStatus, 0, sizeof(fastStatus));
   setMessage("installing");
 
-  // 0) the pointer we hook is always ME7FAST_POINTER (0xE226): the whole mapping table is a 4-byte far pointer whose
-  //    LOW word is at 0xE226 and HIGH word at 0xE228, so we must write all four bytes starting at 0xE226. Writing at
-  //    0xE228 instead (an earlier "ver 1/2" idea from the notes) smashes the pointer's high word and the secondary
-  //    index table just after it, and the bench 8N froze solid - every service stopped answering (2026-10-22).
+  // 0) the pointer we hook is always ME7FAST_POINTER (0xE228, the offset word; the page word is at 0xE22A), whatever
+  //    the ECU's bootrom version. Bench 8N (2026-10-22): a linear 24-bit address written at 0xE228 froze it (every
+  //    service stopped answering), and a hook at 0xE226 did nothing (see the header).
   fastPointer = ME7FAST_POINTER;
 
   // 1) build and write the blob into RAM in ME7FAST_CHUNK-byte chunks (small enough that each 0x3D write fits the
@@ -191,7 +113,7 @@ bool me7FastInstall(const uint32_t *varAddrs, uint8_t varCount)
     }
   }
 
-  // 2) read the handler start back and compare - make sure the blob really landed before we hook anything
+  // 2) read the handler's start back and compare: make sure the blob really landed before we hook anything
   const uint8_t *handler = HANDLER_V0;
   if (varCount != 0)
   {
@@ -228,14 +150,20 @@ bool me7FastInstall(const uint32_t *varAddrs, uint8_t varCount)
     return false;
   }
   fastStatus.state = M7F_HOOKED;
-  // say which pointer was hooked so the bench log shows the version choice
+  // the status says where it hooked and which routine went in, for the bench log
+  const char *handlerName = "Fast";
+  if (varCount == 0)
+  {
+    handlerName = "Test link";
+  }
   char hookMessage[48];
   snprintf(hookMessage, sizeof(hookMessage), "installed + hooked @0x%04lX (%s)", (unsigned long)fastPointer,
-           varCount == 0 ? "Test link" : "Fast");
+           handlerName);
   setMessage(hookMessage);
   return true;
 }
 
+// Un-hook: writes the saved original pointer back. Safe to call when not hooked. true = it wrote it.
 bool me7FastUnhook()
 {
   if (!fastStatus.haveSaved)
@@ -251,6 +179,7 @@ bool me7FastUnhook()
   return ok;
 }
 
+// one sample: sends 0xB7 and copies the routine's reply into out (up to cap bytes). The byte count, or -1 on failure.
 int me7FastPoll(uint8_t *out, uint8_t cap)
 {
   uint8_t resp[160];
@@ -262,8 +191,8 @@ int me7FastPoll(uint8_t *out, uint8_t cap)
   {
     return -1;
   }
-  // resp is the ECU-framed reply; for v0 it carries our "C2G!" block. The exact framing (leading byte /
-  // endianness) is the one bench-capture item - for now hand the raw reply back and let the caller read it.
+  // resp is the ECU-framed reply (v0: our "C2G!" block; v1: the values in order), handed back raw for the caller to
+  // read
   uint8_t count = respLen;
   if (count > cap)
   {
@@ -273,7 +202,100 @@ int me7FastPoll(uint8_t *out, uint8_t cap)
   return count;
 }
 
+// where the install / hook stands, with its last message (the web UI and the bench log read it)
 const Me7FastStatus &me7FastStatusGet()
 {
   return fastStatus;
+}
+
+// Builds the blob in buf and returns its length. First a 198-byte table of the 4-byte far pointer 0x00387AC6 (the
+// handler's address, little-endian "C6 7A 38 00" over and over) so whatever sub-index the ECU works out lands on our
+// one handler. Then the handler: the v0 marker (Test link) when varCount is 0, else v1 Fast followed by its config
+// block [N word][N x {page16, off16}] built from each variable's 24-bit address.
+static uint16_t buildBlob(uint8_t *buf, const uint32_t *varAddrs, uint8_t varCount)
+{
+  const uint32_t handlerAddr = ME7FAST_SCRATCH + HANDLER_OFFSET; // 0x387AC6
+  const uint8_t pattern[4] = {
+      (uint8_t)handlerAddr,         // code address, low byte
+      (uint8_t)(handlerAddr >> 8),  // code address, high byte
+      (uint8_t)(handlerAddr >> 16), // code segment
+      0x00};                        // always 0
+  for (uint16_t i = 0; i < HANDLER_OFFSET; i++)
+  {
+    buf[i] = pattern[i & 3]; // i & 3 = the remainder of i / 4: the 4 bytes over and over
+  }
+  if (varCount == 0)
+  {
+    memcpy(buf + HANDLER_OFFSET, HANDLER_V0, sizeof(HANDLER_V0)); // Test link marker
+    return HANDLER_OFFSET + (uint16_t)sizeof(HANDLER_V0);
+  }
+  // v1: the Fast handler, then its config block at the FIXED offset the handler reads (ME7FAST_CONFIG_OFFSET =
+  // 0x387B10). The gap between the handler's end and the config is zeroed so nothing stray sits there.
+  memcpy(buf + HANDLER_OFFSET, HANDLER_V1, sizeof(HANDLER_V1));
+  for (uint16_t i = HANDLER_OFFSET + (uint16_t)sizeof(HANDLER_V1); i < ME7FAST_CONFIG_OFFSET; i++)
+  {
+    buf[i] = 0x00;
+  }
+  uint16_t pos = ME7FAST_CONFIG_OFFSET;
+  buf[pos++] = varCount; // N, low byte
+  buf[pos++] = 0x00;     // N, high byte (count never exceeds 255)
+  for (uint8_t varIndex = 0; varIndex < varCount; varIndex++)
+  {
+    const uint16_t page = (uint16_t)(varAddrs[varIndex] >> 14);         // EXTP page = address / 0x4000
+    const uint16_t pageOffset = (uint16_t)(varAddrs[varIndex] & 0x3FFF); // 14-bit offset within that page
+    buf[pos++] = (uint8_t)page;              // page, low byte
+    buf[pos++] = (uint8_t)(page >> 8);       // page, high byte
+    buf[pos++] = (uint8_t)pageOffset;        // offset, low byte
+    buf[pos++] = (uint8_t)(pageOffset >> 8); // offset, high byte
+  }
+  return pos;
+}
+
+// WriteMemoryByAddress (0x3D): writes len bytes to a 24-bit address. true = the ECU accepted (positive answer 0x7D).
+static bool fastWriteMem(uint32_t addr, const uint8_t *data, uint8_t len)
+{
+  uint8_t resp[16];
+  uint8_t respLen;
+  uint8_t req[5 + ME7FAST_CHUNK];
+  req[0] = 0x3D;                  // WriteMemoryByAddress
+  req[1] = (uint8_t)(addr >> 16); // address high byte
+  req[2] = (uint8_t)(addr >> 8);  // address middle byte
+  req[3] = (uint8_t)addr;         // address low byte
+  req[4] = len;                   // how many bytes follow
+  for (uint8_t i = 0; i < len; i++)
+  {
+    req[5 + i] = data[i];
+  }
+  if (!kwp2000Request(req, 5 + len, resp, respLen, 800, sizeof(resp)))
+  {
+    return false;
+  }
+  return respLen >= 1 && resp[0] == 0x7D;
+}
+
+// ReadMemoryByAddress (0x23): reads len bytes from a 24-bit address into out (up to cap). The byte count, or -1.
+static int fastReadMem(uint32_t addr, uint8_t len, uint8_t *out, uint8_t cap)
+{
+  uint8_t resp[160];
+  uint8_t respLen;
+  uint8_t req[5] = {0x23,                  // ReadMemoryByAddress
+                    (uint8_t)(addr >> 16), // address high byte
+                    (uint8_t)(addr >> 8),  // address middle byte
+                    (uint8_t)addr,         // address low byte
+                    len};                  // how many bytes to read
+  if (!kwp2000Request(req, 5, resp, respLen, 800, sizeof(resp)))
+  {
+    return -1;
+  }
+  if (respLen < 1 || resp[0] != 0x63)
+  {
+    return -1;
+  }
+  uint8_t count = respLen - 1; // first byte is the 0x63 positive-answer id
+  if (count > cap)
+  {
+    count = cap;
+  }
+  memcpy(out, resp + 1, count);
+  return count;
 }

@@ -368,10 +368,12 @@ static void pageEventCb(lv_event_t *event)
     {
       uiOpenMenu(); // swipe up/down also opens the menu (handy with gloves)
     }
+    lv_indev_wait_release(lv_indev_active()); // LVGL would also send a click when the finger lifts: not a tap
   }
   else if (code == LV_EVENT_LONG_PRESSED)
   {
     uiOpenMenu();
+    lv_indev_wait_release(lv_indev_active()); // the release must not also count as a tap (or acknowledge an alert)
   }
   else if (code == LV_EVENT_CLICKED)
   {
@@ -998,7 +1000,8 @@ static void buildOil(PageWidgets &widgets, const GaugePageCfg &pageCfg)
   lv_obj_align(widgets.unit, LV_ALIGN_CENTER, 0, 8);
   lv_label_set_text(widgets.name, pageCfg.label[0] ? pageCfg.label : "OIL");
   lv_obj_align(widgets.name, LV_ALIGN_CENTER, 0, -100);
-  fitOneLine(widgets.name, glassWidthAt(-100, lv_font_get_line_height(&lv_font_montserrat_24))); // 0.30.2: wider up herewidgets.scr, &lv_font_montserrat_24, palette.muted, LV_ALIGN_CENTER, 0, 50, "LEVEL  --");
+  fitOneLine(widgets.name, glassWidthAt(-100, lv_font_get_line_height(&lv_font_montserrat_24))); // wider up here
+  widgets.value2 = label(widgets.scr, &lv_font_montserrat_24, palette.muted, LV_ALIGN_CENTER, 0, 50, "LEVEL  --"); // oil level OK / LOW
   lv_obj_set_width(widgets.sub, 300);
   lv_obj_set_style_text_align(widgets.sub, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(widgets.sub, LV_LABEL_LONG_DOT);
@@ -1170,6 +1173,7 @@ static uint8_t signalIcon(signalId_t id)
   case SIG_MAF: return ICON_INTAKE;
   case SIG_AMBIENT: return ICON_OUTSIDE;
   case SIG_FUEL_LEVEL:
+  case SIG_FUEL_LITRES:
   case SIG_ETHANOL: return ICON_FUEL;
   case SIG_FUEL_PRESSURE:
   case SIG_BARO: return ICON_PRESSURE;
@@ -2267,6 +2271,7 @@ static void dsgScreenCb(lv_event_t *event)
   if (code == LV_EVENT_CLICKED || code == LV_EVENT_LONG_PRESSED)
   {
     uiOpenMenu(); // tap anywhere: back to the menu
+    lv_indev_wait_release(lv_indev_active()); // a long press's release must not click the menu too
   }
 }
 
@@ -2318,8 +2323,8 @@ void uiOpenDsg()
 static void showModeScreen(uint8_t item); // mode screens, below the menu
 static void showHaldexMode();
 
-// open a menu item: Haldex / CAN / K-line / Bluetooth OBD have mode screens, DSG its own screen, Output and the chain
-// an info page, and Settings
+// open a menu item: Haldex has its own screen, Gearbox and the drag timer theirs, the rest are mode screens the firmware
+// fills (Display.cpp modeView), and Settings
 static void openMenuItem(int item)
 {
   if (item == MENU_HALDEX)
@@ -2328,7 +2333,7 @@ static void openMenuItem(int item)
     return;
   }
   if (item == MENU_CAN || item == MENU_KLINE || item == MENU_BLE || item == MENU_OUTPUT || item == MENU_CHAIN ||
-      item == MENU_ADC)
+      item == MENU_ADC || item == MENU_NAV || item == MENU_ECU || item == MENU_OIL || item == MENU_TRIGGERS)
   {
     showModeScreen((uint8_t)item);
     return;
@@ -2403,17 +2408,22 @@ struct MenuItemDef
   const char *title;
   const char *desc;
 };
+// in the order of the web UI's Settings > Device > Menu and Tabs switches (data/app.js menuItems), then Settings
 static const MenuItemDef menuDefs[] = {
     {MENU_GAUGES, MI_GAUGES, "Gauges", "Your gauge pages."},
-    {MENU_HALDEX, MI_HALDEX, "Haldex", "OpenHaldex lock, target and mode."},
+    {MENU_NAV, MI_NAV, "Navigation", "The phone's next turn: Off, Pop Up or the whole Route."},
     {MENU_CAN, MI_CAN, "CAN Bus", "Every message on the bus, decoded with the car's DBC."},
-    {MENU_KLINE, MI_KLINE, "K-Line", "Measuring blocks from the module picked in the web UI."},
-    {MENU_OUTPUT, MI_OUTPUT, "Output / Illumination", "The output, the illumination input and the brightness."},
-    {MENU_DSG, MI_DSG, "Gearbox", "Selector, gear, speed and lock-up, full screen."}, // 0.26.0: was "DSG" (8HP too)
+    {MENU_HALDEX, MI_HALDEX, "Haldex", "OpenHaldex lock, target and mode."},
     {MENU_ADC, MI_ADC, "ADC", "The 0-5 V sensors on the adc2can expander."},
+    {MENU_ECU, MI_ECU, "usb2ip", "The aftermarket ECU's live values, over WiFi."},
+    {MENU_KLINE, MI_KLINE, "K-Line", "Measuring blocks from the module picked in the web UI."},
+    {MENU_OIL, MI_OIL, "Oil", "The cluster's oil temperature and level."},
+    {MENU_DSG, MI_DSG, "Gearbox", "Selector, gear, speed and lock-up, full screen."},
     {MENU_BLE, MI_BLE, "Bluetooth OBD", "Live PIDs through the paired ELM327 adapter."},
+    {MENU_TRIGGERS, MI_TRIGGERS, "Triggers", "Your alert and output limits, and which have fired."},
     {MENU_CHAIN, MI_CHAIN, "Daisy Chain", "The gauges linked together, who leads and what they share."},
-    {MENU_DRAG, MI_DRAG, "Drag Timer", "0-100 km/h (0-60 mph) from a countdown, with a scoreboard."}, // 0.38.0
+    {MENU_OUTPUT, MI_OUTPUT, "Output", "The output, the illumination input and the brightness."}, // short: fits the glass
+    {MENU_DRAG, MI_DRAG, "Drag Timer", "0-100 km/h (0-60 mph) from a countdown, with a scoreboard."},
     {MENU_SETTINGS, MI_SETTINGS, "Settings", "Brightness, units, theme, 120 ohm. The rest is in the web UI."},
 };
 #define MENU_DEF_COUNT (sizeof(menuDefs) / sizeof(menuDefs[0]))
@@ -2428,6 +2438,7 @@ static lv_obj_t *menuStatusLabel = NULL;
 static char menuStatusLast[48] = "";
 static uint32_t menuTouchMs = 0;
 static lv_obj_t *menuFrom = NULL; // the screen the menu was opened from (idle / long press go back to it)
+static bool menuClosePending = false; // the 10 s idle close is waiting for the LVGL task (menuIdleClose)
 static uiMenuStatus_t menuStatusProvider = NULL;
 
 void uiSetMenuStatus(uiMenuStatus_t provider)
@@ -2619,6 +2630,20 @@ static void menuEventCb(lv_event_t *event)
   }
 }
 
+// The menu's 10 s idle close, run by the LVGL task (uiTick asks for it with lv_async_call, LVGL's "run this function on
+// your next pass"). Going back slides in the screen the menu came from, drawn whole in the task doing the slide. The
+// LVGL task has the stack for that (10 KB); uiTick (6 KB) hasn't: a menu screen (rows of text, five layers deep)
+// overflowed it (coredump 2026-11-03, 0.39.2, after the menu timed out back to a menu screen).
+static void menuIdleClose(void *unused)
+{
+  (void)unused;
+  menuClosePending = false;
+  if (lv_screen_active() == menuScr && lv_tick_elaps(menuTouchMs) > MENU_IDLE_MS) // still idle, still on the menu
+  {
+    uiCloseMenu();
+  }
+}
+
 static void buildMenu()
 {
   menuVisibleCount = 0;
@@ -2664,6 +2689,7 @@ void uiRebuildMenu()
   {
     return;
   }
+  lvglFinishScreenAnimation(); // LVGL mustn't be sliding the menu that is about to go
   lv_obj_t *oldMenu = menuScr;
   buildMenu();
   if (lv_screen_active() == oldMenu)
@@ -2684,7 +2710,10 @@ void uiRebuildMenu()
 // item and slides the content in from that side. Long press or swipe up / down: the menu.
 // ---------------------------------------------------------------------------
 #define MODE_REFRESH_MS 100
-#define MODE_HOT_MS 700 // a changed byte stays lit this long
+#define MODE_HOT_MS 700    // a changed byte stays lit this long
+#define MODE_CHOICE_W 104  // an option button (menu > Navigation: Off / Pop Up / Route), wide ...
+#define MODE_CHOICE_H 44   // ... and high
+#define MODE_CHOICE_GAP 10 // ... and the gap between two
 struct ModeWidgets
 {
   lv_obj_t *scr, *title, *dot, *spinner, *status, *body, *header, *sub, *rows, *grid, *hint;
@@ -2692,6 +2721,10 @@ struct ModeWidgets
   lv_obj_t *cell[8], *cellHex[8], *cellDec[8];
   lv_obj_t *nodeRow, *nodeLine, *node[UI_MODE_NODES], *nodeLabel[UI_MODE_NODES];
   char nodeKey[64];
+  lv_obj_t *choiceRow;                    // the option buttons, in place of the header
+  lv_obj_t *choice[UI_MODE_CHOICES];      // ... each button
+  lv_obj_t *choiceLabel[UI_MODE_CHOICES]; // ... and its words
+  char choiceKey[48];                     // the buttons as last drawn (the lit one + the names): redrawn only on a change
   uint8_t lastData[8];
   uint32_t hotMs[8];
   bool lit[8];
@@ -2794,8 +2827,53 @@ static void modeRefresh(bool force)
 
   setHidden(modeWidgets.rows, view.bytes > 0);
   setHidden(modeWidgets.grid, view.bytes == 0);
-  setHidden(modeWidgets.header, view.nodes > 0);
+  setHidden(modeWidgets.header, view.nodes > 0 || view.choices > 0);
   setHidden(modeWidgets.nodeRow, view.nodes == 0);
+  setHidden(modeWidgets.choiceRow, view.choices == 0);
+  if (view.choices) // Navigation: redraw the buttons only when they change
+  {
+    uint8_t choiceCount = view.choices;
+    if (choiceCount > UI_MODE_CHOICES)
+    {
+      choiceCount = UI_MODE_CHOICES;
+    }
+    char key[48] = "";
+    size_t keyLength = 0;
+    appendf(key, sizeof(key), keyLength, "%d", view.choiceOn);
+    for (uint8_t i = 0; i < choiceCount; i++)
+    {
+      appendf(key, sizeof(key), keyLength, ",%s", view.choiceName[i]);
+    }
+    if (strcmp(key, modeWidgets.choiceKey))
+    {
+      copyStr(modeWidgets.choiceKey, sizeof(modeWidgets.choiceKey), key);
+      // centred as a group: fewer buttons start further in
+      const int32_t firstX = (UI_MODE_CHOICES - choiceCount) * (MODE_CHOICE_W + MODE_CHOICE_GAP) / 2;
+      for (uint8_t i = 0; i < UI_MODE_CHOICES; i++)
+      {
+        setHidden(modeWidgets.choice[i], i >= choiceCount);
+        if (i >= choiceCount)
+        {
+          continue;
+        }
+        lv_obj_set_pos(modeWidgets.choice[i], firstX + i * (MODE_CHOICE_W + MODE_CHOICE_GAP), 0);
+        // the one in use is filled in the accent colour, its words in the background colour; the others are outlined
+        if (i == view.choiceOn)
+        {
+          bgColor(modeWidgets.choice[i], accentColor(), LV_PART_MAIN);
+          lv_obj_set_style_border_color(modeWidgets.choice[i], accentColor(), 0);
+          textColor(modeWidgets.choiceLabel[i], colour(palette.bg));
+        }
+        else
+        {
+          bgColor(modeWidgets.choice[i], colour(palette.panel), LV_PART_MAIN);
+          lv_obj_set_style_border_color(modeWidgets.choice[i], lineColor(), 0);
+          textColor(modeWidgets.choiceLabel[i], colour(palette.text));
+        }
+        labelSet(modeWidgets.choiceLabel[i], view.choiceName[i]);
+      }
+    }
+  }
   if (view.nodes) // Daisy Chain: redraw the circles only when the chain changes
   {
     char key[64] = "";
@@ -2926,12 +3004,25 @@ static void modeEventCb(lv_event_t *event)
   {
     return;
   }
+  lv_indev_wait_release(lv_indev_active()); // the release mustn't also tap an option button the swipe started on
   if (callbacks.onModeSwipe)
   {
     callbacks.onModeSwipe(modeItem, step);
   }
   memset(modeWidgets.hotMs, 0, sizeof(modeWidgets.hotMs)); // a new message: no "changed" flashes from the old one
   slideIn(modeWidgets.body, step);
+  modeRefresh(true);
+}
+
+// an option button tapped (menu > Navigation): the firmware takes it, and the screen shows it straight away
+static void modeChoiceCb(lv_event_t *event)
+{
+  // the button's number, handed to the event when the button was made (a number carried in the "pointer" slot)
+  const uint8_t choiceIndex = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
+  if (callbacks.onModeChoice)
+  {
+    callbacks.onModeChoice(modeItem, choiceIndex);
+  }
   modeRefresh(true);
 }
 
@@ -3037,6 +3128,30 @@ static void buildModeScreen()
     fitOneLine(modeWidgets.nodeLabel[nodeIndex], 44); // 0.30.2: inside its 50 px circle
   }
   lv_obj_add_flag(modeWidgets.nodeRow, LV_OBJ_FLAG_HIDDEN);
+  // option buttons (menu > Navigation), in place of the header. A tap picks one (onModeChoice); a swipe anywhere steps
+  // between them (onModeSwipe), so they work from the web UI's Gauge Control too, which can only swipe or tap the middle
+  modeWidgets.choiceRow = plainObject(modeWidgets.body);
+  lv_obj_set_size(modeWidgets.choiceRow, UI_MODE_CHOICES * MODE_CHOICE_W + (UI_MODE_CHOICES - 1) * MODE_CHOICE_GAP, MODE_CHOICE_H);
+  lv_obj_align(modeWidgets.choiceRow, LV_ALIGN_CENTER, 0, -96);
+  for (uint8_t choiceIndex = 0; choiceIndex < UI_MODE_CHOICES; choiceIndex++)
+  {
+    lv_obj_t *button = lv_obj_create(modeWidgets.choiceRow);
+    lv_obj_remove_style_all(button);
+    modeWidgets.choice[choiceIndex] = button;
+    lv_obj_set_size(button, MODE_CHOICE_W, MODE_CHOICE_H);
+    lv_obj_set_style_radius(button, MODE_CHOICE_H / 2, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(button, colour(palette.panel), 0);
+    lv_obj_set_style_border_width(button, 2, 0);
+    lv_obj_set_style_border_color(button, lineColor(), 0);
+    lv_obj_remove_flag(button, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_EVENT_BUBBLE); // a long press on a button still reaches the screen (the menu)
+    // the button's number goes in the event's "pointer" slot (a plain number, not an address), read back in modeChoiceCb
+    lv_obj_add_event_cb(button, modeChoiceCb, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)choiceIndex);
+    modeWidgets.choiceLabel[choiceIndex] = label(button, &lv_font_montserrat_18, palette.text, LV_ALIGN_CENTER, 0, 0, "");
+  }
+  lv_obj_add_flag(modeWidgets.choiceRow, LV_OBJ_FLAG_HIDDEN);
   modeWidgets.hint = glassLabel(modeWidgets.scr, &lv_font_montserrat_14, palette.muted, LV_ALIGN_BOTTOM_MID, 0, -40, "");
   lv_obj_add_event_cb(modeWidgets.scr, modeEventCb, LV_EVENT_GESTURE, NULL);
   lv_obj_add_event_cb(modeWidgets.scr, modeEventCb, LV_EVENT_LONG_PRESSED, NULL);
@@ -3386,6 +3501,11 @@ static lv_obj_t *smallButton(lv_obj_t *parent, int x, uint32_t color, const char
 
 static void showThemePicker()
 {
+  // one left behind (the picker was left by the web UI's page buttons or Follow Page, not Cancel / Apply): delete it
+  if (themeScr && themeScr != lv_screen_active())
+  {
+    lv_obj_delete(themeScr);
+  }
   themeScr = newScreen();
   label(themeScr, &lv_font_montserrat_24, palette.accent, LV_ALIGN_TOP_MID, 0, 36, "THEME");
   // options: every theme in table order; Custom only once it has been set up in the web UI (it needs colour pickers)
@@ -3975,13 +4095,29 @@ static void navShowPageUnder()
   navCoveredPage = NULL;
 }
 
-// a tap on the card hides it until the next turn (and doesn't reach the page underneath)
+// A tap or a long press on the card: it goes away and the gauges come back (it doesn't reach the page underneath). The
+// firmware is told (onNavDismissed): in Pop Up the card comes back for the next turn, in Route not for the rest of
+// the route.
 static void navTapped(lv_event_t *event)
 {
   (void)event;
+  if (lv_obj_has_flag(navBox, LV_OBJ_FLAG_HIDDEN))
+  {
+    return; // gone already
+  }
   navDismissed = true;
   lv_obj_add_flag(navBox, LV_OBJ_FLAG_HIDDEN);
   navShowPageUnder(); // 0.30.9
+  if (callbacks.onNavDismissed)
+  {
+    callbacks.onNavDismissed();
+  }
+  // back to the gauges: the card may have come up over the menu or one of its screens (Navigation's own, say)
+  if (pageCount && lv_screen_active() != pages[activePage].scr)
+  {
+    menuOpen = false;
+    showScreen(pages[activePage].scr, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+  }
 }
 
 // the card's colours from the theme. Done at every show, so a theme change or night dimming reaches it too.
@@ -4067,7 +4203,8 @@ static void buildNav()
   lv_obj_set_style_pad_all(navBox, 0, 0);
   lv_obj_remove_flag(navBox, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(navBox, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(navBox, navTapped, LV_EVENT_CLICKED, NULL);
+  lv_obj_add_event_cb(navBox, navTapped, LV_EVENT_SHORT_CLICKED, NULL); // a tap ...
+  lv_obj_add_event_cb(navBox, navTapped, LV_EVENT_LONG_PRESSED, NULL);  // ... or a long press: back to the gauges
   lv_obj_add_flag(navBox, LV_OBJ_FLAG_HIDDEN);
 
   // the accent band across the top
@@ -5013,6 +5150,8 @@ static void bootLogoMoveTo(int32_t targetMs)
 #define SAVER_LOCK_JUMP 10.0f
 #define SHUTDOWN_MAX_MS 12000
 static lv_obj_t *saverScr = NULL; // the screensaver
+static lv_obj_t *saverFrom = NULL; // the screen it came up over (a gauge page, a menu screen ...): it goes back there
+static bool saverLeavePending = false; // leaving the screensaver / Rev Runner is waiting for the LVGL task (leaveSaver)
 static lv_obj_t *darkScr = NULL;  // shutdown + sleep, the dark standby screen, the wake clip
 static lv_obj_t *retiredScreens[4] = {};
 static bool standbyOn = false;    // ignition off: the glass is dark and nothing refreshes
@@ -5157,6 +5296,82 @@ static void saverTapCb(lv_event_t *)
   }
 }
 
+// 0.39.5: may the screensaver come up over this screen? A gauge page, a menu screen (CAN, Navigation ...), Haldex,
+// Gearbox, Settings, and the drag timer when it isn't timing. Not the menu itself: it goes back by itself after 10 s.
+static bool saverCanCover(lv_obj_t *screen)
+{
+  if (screen == NULL)
+  {
+    return false;
+  }
+  if (pageCount && screen == pages[activePage].scr)
+  {
+    return true;
+  }
+  if (screen == modeWidgets.scr || screen == haldexWidgets.scr || screen == dsgScr || screen == settingsScr ||
+      screen == infoScr)
+  {
+    return true;
+  }
+  if (dragScr && screen == dragScr && !dragIsTiming())
+  {
+    return true;
+  }
+  return false;
+}
+
+// where the screensaver (or Rev Runner) goes back to: the screen it came up over if that's still there, else the gauge
+// page (NULL = no pages)
+static lv_obj_t *saverBackScreen()
+{
+  if (saverFrom != NULL && (saverFrom == modeWidgets.scr || saverFrom == haldexWidgets.scr || saverFrom == dsgScr ||
+                            saverFrom == dragScr || saverFrom == settingsScr || saverFrom == infoScr))
+  {
+    return saverFrom;
+  }
+  if (pageCount)
+  {
+    return pages[activePage].scr;
+  }
+  return NULL;
+}
+
+// Leaving the screensaver or Rev Runner, done by the LVGL task (uiTick asks with lv_async_call): going back slides in
+// a whole screen, and a menu screen needs more stack than uiTick has (see menuIdleClose).
+static void leaveSaver(void *unused)
+{
+  (void)unused;
+  saverLeavePending = false;
+  lv_obj_t *active = lv_screen_active();
+  const bool onSaver = saverScr != NULL && active == saverScr;
+  const bool onGame = gameScr != NULL && active == gameScr;
+  if (!onSaver && !onGame)
+  {
+    return; // gone already (a page change, standby, a number to show ...)
+  }
+  activityMs = lv_tick_get();
+  saverTapped = false;
+  saverQuestion = NULL;
+  lv_obj_t *back = saverBackScreen();
+  saverFrom = NULL;
+  if (back)
+  {
+    showScreen(back, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
+  }
+  retireScreen(saverScr);
+  retireScreen(gameScr);
+}
+
+// from uiTick: ask the LVGL task to leave the screensaver / Rev Runner (once)
+static void askLeaveSaver()
+{
+  if (!saverLeavePending)
+  {
+    saverLeavePending = true;
+    lv_async_call(leaveSaver, NULL);
+  }
+}
+
 // 0.29.1: the Screensaver switch when the saver came up. Before, a saver shown by hand ignored the switch completely,
 // so switching it off from on did nothing; now switching it OFF while it's up always takes it away.
 static bool saverWasOnAtOpen = false;
@@ -5205,15 +5420,12 @@ static void saverRefresh()
   }
   if (tapped || carMoving() || runtime.alertActive || rpmMoved || lockMoved || switchedOff || numberShowing())
   {
-    activityMs = lv_tick_get();
-    saverTapped = false;
-    saverQuestion = NULL;
-    if (pageCount)
-    {
-      showScreen(pages[activePage].scr, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
-    }
-    retireScreen(saverScr);
+    askLeaveSaver(); // back to the screen it came up over (the LVGL task does it)
     return;
+  }
+  if (saverFrom != NULL && saverFrom == modeWidgets.scr)
+  {
+    modeRefresh(false); // a menu screen underneath keeps its source (the K-line session, the adapter) open
   }
   if (pageCount)
   {
@@ -5317,12 +5529,7 @@ static void gameRefresh()
 {
   if (runnerWantsOut() || carMoving() || runtime.alertActive)
   {
-    activityMs = lv_tick_get();
-    if (pageCount)
-    {
-      showScreen(pages[activePage].scr, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
-    }
-    retireScreen(gameScr);
+    askLeaveSaver(); // back to the screen the screensaver came up over (the LVGL task does it)
     return;
   }
   if (pageCount)
@@ -5346,6 +5553,7 @@ static void leaveSaverForNumber()
   activityMs = lv_tick_get(); // the screensaver's clock starts again from now
   saverTapped = false;
   saverQuestion = NULL;
+  saverFrom = NULL; // the number shows over the gauge page, whatever the saver came up over
   if (pageCount)
   {
     showScreen(pages[activePage].scr, LV_SCR_LOAD_ANIM_NONE, 0, 0, false); // straight to the page, under the number
@@ -5365,6 +5573,7 @@ static void darkRefresh()
   if (waking && spriteDone(sprite)) // the wake clip has played: the gauge
   {
     waking = false;
+    menuOpen = false; // back on the gauge page, whatever screen the ignition went off on
     if (pageCount)
     {
       showScreen(pages[activePage].scr, LV_SCR_LOAD_ANIM_FADE_IN, 400, 0, false);
@@ -5448,8 +5657,10 @@ void uiSaverShow()
   {
     return;
   }
-  if (pageCount && !standbyOn && lv_screen_active() == pages[activePage].scr)
+  lv_obj_t *active = lv_screen_active();
+  if (!standbyOn && saverCanCover(active)) // 0.39.5: over any screen it may cover, not only a gauge page
   {
+    saverFrom = active;
     saverOpen();
     saverShownByHand = true; // 0.24.12: stays up even with the screensaver switched off
   }
@@ -5466,6 +5677,7 @@ bool uiSaverActive()
 // ---------------------------------------------------------------------------
 static void destroyPages()
 {
+  lvglFinishScreenAnimation(); // LVGL mustn't be sliding a page that is about to go
   for (uint8_t pageIndex = 0; pageIndex < pageCount; pageIndex++)
   {
     if (pages[pageIndex].scr)
@@ -5534,7 +5746,9 @@ void uiRebuildPages()
   {
     return;
   }
-  const bool wasVisible = !menuOpen && !bootScr && !saverScr && !darkScr && !gameScr;
+  lvglFinishScreenAnimation(); // first: a page change LVGL is sliding ends now, so the screen showing is settled
+  // the page itself is on the screen (asked of LVGL: a flag could be left over from before a standby)
+  const bool wasVisible = pageCount > 0 && activePage < pageCount && lv_screen_active() == pages[activePage].scr;
   createPages();
   if (wasVisible)
   {
@@ -5700,7 +5914,8 @@ void uiTick()
   if (pageRangesPending) // 0.36.4: an adc2can's dial range changed: the pages again, here where the lock is already held
   {
     pageRangesPending = false;
-    const bool wasVisible = !menuOpen && !bootScr && !saverScr && !darkScr && !gameScr; // as uiRebuildPages
+    lvglFinishScreenAnimation(); // as uiRebuildPages: a page change LVGL is sliding ends first
+    const bool wasVisible = pageCount > 0 && activePage < pageCount && lv_screen_active() == pages[activePage].scr; // as uiRebuildPages
     createPages();
     if (wasVisible)
     {
@@ -5731,25 +5946,29 @@ void uiTick()
   {
     darkRefresh();
   }
+  else if (settings.saverEnabled && lv_tick_elaps(activityMs) > settings.saverDelayS * 1000UL &&
+           !lv_display_get_screen_prev(lv_display_get_default()) && !numberShowing() && // 0.29.1: not over a number
+           saverCanCover(active)) // 0.39.5: over any screen it may cover (it was a gauge page only), and back there after
+  {
+    saverShownByHand = false; // 0.24.12: the screensaver's own timer - it leaves if switched off
+    saverFrom = active;
+    saverOpen(); // the car is still and nobody has touched the glass
+  }
   else if (pageCount && active == pages[activePage].scr)
   {
-    if (settings.saverEnabled && lv_tick_elaps(activityMs) > settings.saverDelayS * 1000UL &&
-        !lv_display_get_screen_prev(lv_display_get_default()) && !numberShowing()) // 0.29.1: not over a number
-    {
-      saverShownByHand = false; // 0.24.12: the screensaver's own timer - it leaves if switched off
-      saverOpen(); // the car is still and nobody has touched the glass
-    }
-    else
-    {
-      refreshPage(pages[activePage]);
-      refreshSourceSpinner(pages[activePage]); // 0.15.0: after the page has written its note line
-    }
+    refreshPage(pages[activePage]);
+    refreshSourceSpinner(pages[activePage]); // 0.15.0: after the page has written its note line
   }
   else if (active == menuScr)
   {
     if (lv_tick_elaps(menuTouchMs) > MENU_IDLE_MS)
     {
-      uiCloseMenu(); // 10 s idle: back to the gauge
+      // 10 s idle: back to the gauge (or the screen the menu came from), done by the LVGL task (menuIdleClose)
+      if (!menuClosePending)
+      {
+        menuClosePending = true;
+        lv_async_call(menuIdleClose, NULL);
+      }
     }
     else
     {
@@ -6062,6 +6281,7 @@ void uiApplyTheme()
   {
     return;
   }
+  lvglFinishScreenAnimation(); // every screen is built again: LVGL mustn't be sliding one of the old ones
   uiSetTheme(settings.theme);
   lv_obj_t *active = lv_screen_active();
   uiRebuildPages();
@@ -6081,6 +6301,8 @@ void uiApplyTheme()
     if (active == dragScr)
     {
       lv_screen_load(menuScr);
+      menuOpen = true;
+      menuTouchMs = lv_tick_get(); // a fresh menu: its idle time-out starts now, not from the last touch
     }
     lv_obj_delete_async(dragScr);
     dragScr = NULL;
@@ -6093,6 +6315,8 @@ void uiApplyTheme()
       if (active == *screenPtr)
       {
         lv_screen_load(menuScr);
+        menuOpen = true;
+        menuTouchMs = lv_tick_get(); // a fresh menu: its idle time-out starts now, not from the last touch
       }
       lv_obj_delete_async(*screenPtr);
       *screenPtr = NULL;

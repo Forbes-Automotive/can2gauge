@@ -1,8 +1,7 @@
 #pragma once
-// ---------------------------------------------------------------------------
-// Gauge colour themes (0.5.0). One table feeds the gauge (GaugeUI palette, on-screen theme picker), the web UI
-// dropdown (GET /api/themes) and Match car (VIN -> make + model year -> theme). Manufacturer colours, eras and the
-// palette rules come from docs/Manufacturer themes.pdf.
+// Gauge colour themes. One table (src/can2gauge_themes.cpp) feeds the gauge (GaugeUI palette, on-screen theme picker),
+// the web UI dropdown (GET /api/themes) and Match car (VIN -> make + model year -> theme). Manufacturer colours, eras and
+// the palette rules come from docs/Manufacturer themes.pdf.
 //
 // settings.theme holds a theme id. Ids are permanent - a saved id must always mean the same theme - so new themes
 // get new ids at the end, never a renumber:
@@ -13,56 +12,67 @@
 //
 // Boot logos for boot logo option 5 live on LittleFS as /logos/<key>.bin, key = a LogoDef key ("vw", "vauxhall").
 // This header is included by lib/GaugeUI, so it only pulls in stdint.
-// ---------------------------------------------------------------------------
 #include <stdint.h>
 #include <stddef.h>
 
-#define THEME_TEAL 0
-#define THEME_AMBER 1
-#define THEME_RED 2
-#define THEME_WHITE 3
-#define THEME_CUSTOM 4
-#define THEME_MATCH 5
-#define THEME_OEM_FIRST 16
-#define THEME_NONE 0xFF // settings.themeMatched before any VIN has been read
+// ===== Theme ids (saved in the settings: never renumber) =====
+#define THEME_TEAL 0       // can2gauge teal (the Forbes Automotive palette)
+#define THEME_AMBER 1      // can2gauge amber
+#define THEME_RED 2        // can2gauge red
+#define THEME_WHITE 3      // can2gauge white
+#define THEME_CUSTOM 4     // dial and needle colours set in the web UI
+#define THEME_MATCH 5      // Match car: the make's theme from the VIN
+#define THEME_OEM_FIRST 16 // the first manufacturer theme
+#define THEME_NONE 0xFF    // settings.themeMatched before any VIN has been read
 
-enum themeConf_t : uint8_t
+// ===== How sure a theme's colours are (ThemeDef.conf) =====
+enum themeConf_t
 {
   CONF_APPROX = 0, // era and hue from memory - check against a photo
   CONF_KNOWN,      // widely documented era colour
   CONF_SOURCED,    // wavelength / colour-picker value from a cited source
 };
 
+// ===== The table rows =====
+// one theme. The table is filled in field order and the simulator reads it the same way, so keep the fields in this order.
 struct ThemeDef
 {
-  uint8_t id;
-  uint8_t conf;          // themeConf_t
-  uint16_t from, to;     // era in model years, to = 9999 while current; 0/0 for the non-manufacturer entries
-  uint32_t dial, needle; // 0xRRGGBB (the original palettes list their accent here, for previews)
-  const char *name;      // "Volkswagen - Blue"
-  const char *make;      // match / logo key ("vw"); NULL for the non-manufacturer entries
-  const char *era;       // "1999-2009 (Golf Mk4-5, ...)"
+  uint8_t id;       // theme id (see the list above)
+  uint8_t conf;     // how sure the colours are: a themeConf_t
+  uint16_t from;    // era start, model year; 0 for the non-manufacturer entries
+  uint16_t to;      // era end, model year, 9999 while current; 0 for the non-manufacturer entries
+  uint32_t dial;    // dial colour, 0xRRGGBB (the original palettes list their accent here, for previews)
+  uint32_t needle;  // needle colour, 0xRRGGBB
+  const char *name; // "Volkswagen - Blue"
+  const char *make; // match / logo key ("vw"); NULL for the non-manufacturer entries
+  const char *era;  // "1999-2009 (Golf Mk4-5, ...)"
 };
 
+// one boot logo
 struct LogoDef
 {
   const char *key;  // file name: /logos/<key>.bin
   const char *name; // shown in the web UI and as the text fallback when the file is missing
 };
 
+// ===== Themes =====
 uint8_t themeCount();                   // every entry, display order: can2gauge palettes, Match car, Custom, makes A-Z
-const ThemeDef &themeAt(uint8_t index);
+const ThemeDef &themeAt(uint8_t index); // the theme in that row of the table (past the end = the first)
 const ThemeDef *themeById(uint8_t id);  // NULL = no such id
-bool themeValid(uint8_t id);
-const char *themeName(uint8_t id);
+bool themeValid(uint8_t id);            // is this a theme id the table knows?
+const char *themeName(uint8_t id);      // "Volkswagen - Blue", "?" for an unknown id
 uint8_t themeEffective(uint8_t id);     // Match car -> the matched theme, or Custom while none; others unchanged
 void themeColours(uint8_t id, uint32_t &dial, uint32_t &needle); // Custom -> settings, Match car -> resolved first
-uint8_t themeMatch(const char *makeKey, uint16_t year);          // best manufacturer theme, year 0 = unknown -> newest era
-void themeVehicleDetected(const char *logoKey, uint16_t year);   // ELM decoded a VIN: store the match, re-theme on Match car
 
-uint8_t logoCount();
-const LogoDef &logoAt(uint8_t index);
-const char *logoName(const char *key);  // NULL = unknown key
-const char *themeLogoKey();             // boot logo 5: chosen make, else the VIN's make on Match car, else the theme's make
+// ===== Match car =====
+uint8_t themeMatch(const char *makeKey, uint16_t year);        // best manufacturer theme, year 0 = unknown -> newest era
+void themeVehicleDetected(const char *logoKey, uint16_t year); // a VIN was decoded: store the match, re-theme on Match car
 
+// ===== Boot logos =====
+uint8_t logoCount();                   // how many boot logos there are
+const LogoDef &logoAt(uint8_t index);  // the logo in that row of the table (past the end = the first)
+const char *logoName(const char *key); // NULL = unknown key
+const char *themeLogoKey();            // boot logo 5: chosen make, else the VIN's make on Match car, else the theme's make
+
+// ===== Colours from the web UI =====
 uint32_t themeParseHex(const char *text, uint32_t fallback); // "#RRGGBB" / "RRGGBB" -> 0xRRGGBB

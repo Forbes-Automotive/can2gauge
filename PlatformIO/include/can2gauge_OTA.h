@@ -3,6 +3,8 @@
 
 // Updates go through the shared Forbes Automotive OTA module (include/ota_manager.h, _SharedTheme v2): /api/ota/*,
 // guarded filesystem, recovery page, guided GitHub update in data/ota.js. otaInProgress() / otaWebClientActive() come
-// from ota_manager.h.
+// from ota_manager.h, and so do the hooks can2gauge_OTA.cpp fills in (otaIsSafe, otaOnStart, otaOnEnd).
+
+// ===== Set-up and upkeep =====
 void setupOTA(); // configure + attach the shared OTA routes (call first in setupWebServer)
 void otaTick();  // confirm a freshly installed image once the device has run for a while

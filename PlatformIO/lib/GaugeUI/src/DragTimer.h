@@ -24,3 +24,4 @@ struct DragColours
 lv_obj_t *dragOpen(const DragColours &colours); // a new screen with the timer, ready; load it yourself
 void dragTick();                                // from uiTick while its screen shows
 void dragClosed();                              // its screen is being deleted (a theme change): forget its objects
+bool dragIsTiming();                            // a countdown or a run is on (the screensaver mustn't cover it)

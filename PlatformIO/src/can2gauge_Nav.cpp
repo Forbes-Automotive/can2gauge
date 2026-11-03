@@ -34,6 +34,9 @@ static uint32_t shownChangeCount = 0;     // changeCount when the card was last 
 static uint32_t lastAdvertCheckMs = 0;    // 0.30.5: millis() navTick last checked the gauge is still advertising
 static volatile bool isAdvertising = false; // 0.30.5: the phone can see the gauge now (checked every few seconds)
 static uint32_t advertRestarts = 0;       // 0.30.5: times advertising had stopped and was started again (web UI)
+// set from the screen's task, read here (volatile: another task changes them)
+static volatile bool isSilenced = false;      // Route: the card was sent away on the glass - away for the rest of the route
+static volatile bool isRestartWanted = false; // a mode picked on the glass switched the link on / off: navHouseTick does it
 #define NAV_ADVERT_CHECK_MS 5000          // how often navTick checks the advert is still going
 EXT_RAM_BSS_ATTR static UiNavView view;   // the card's contents (660 bytes: kept off the logic task's stack)
 
@@ -252,6 +255,7 @@ static void startService()
 {
   if (serviceStarted)
   {
+    NimBLEDevice::getServer()->advertiseOnDisconnect(true); // switched off took this away (below)
     NimBLEDevice::startAdvertising(); // made before (switched off and on again): just advertise again
     return;
   }
@@ -325,6 +329,7 @@ void setupNav()
 
 void navRestart()
 {
+  isSilenced = false; // a new mode: a card sent away comes back
   if (navWanted())
   {
     // 0.37.15: Bluetooth already running (the OBD adapter connected, or a scan) and the nav service never made: adding
@@ -354,6 +359,7 @@ void navRestart()
     NimBLEServer *server = NimBLEDevice::getServer();
     if (server)
     {
+      server->advertiseOnDisconnect(false); // or NimBLE starts advertising again the moment the phone drops below
       const uint8_t connectedCount = server->getConnectedCount(); // phones connected to us (normally 0 or 1)
       for (uint8_t i = 0; i < connectedCount; i++)
       {
@@ -376,6 +382,65 @@ void navShowTest()
     testUntilMs = 1; // 0 means "no test"
   }
   shownInstruction[0] = '\0'; // count it as a new turn, so a card tapped away comes back for it
+}
+
+// ---------------------------------------------------------------------------
+// the screen's own Navigation item (menu > Navigation, src/can2gauge_Display.cpp navView)
+// ---------------------------------------------------------------------------
+
+// Off / Pop Up / Route picked on the glass (a button or a swipe). Saved like a web UI change. Bluetooth is started or
+// stopped by the house task (navHouseTick): the screen's task has too little stack for it. Picking a mode, even the one
+// already set, brings back a card that was sent away.
+void navSetMode(uint8_t mode)
+{
+  if (mode > NAV_MODE_WHOLE_ROUTE)
+  {
+    return;
+  }
+  isSilenced = false;
+  shownInstruction[0] = '\0'; // counts as a new turn, so a card sent away comes back for it
+  if (mode == settings.navMode)
+  {
+    return;
+  }
+  const bool wasWanted = navWanted();
+  settings.navMode = mode;
+  settingsDirty = true; // the house task saves it
+  if (navWanted() != wasWanted)
+  {
+    isRestartWanted = true; // switched on or off: the phone link starts or stops
+  }
+}
+
+// the card was tapped or held away on the glass. Show Test Turn ends there. In Route the card stays away for the rest
+// of the route (or until Route is picked again); in Pop Up GaugeUI keeps it away until the next turn by itself.
+void navDismissedOnGlass()
+{
+  if (testUntilMs != 0)
+  {
+    testUntilMs = millis() | 1; // its time is up now: navTick ends it (| 1: never 0, which means "no test")
+    return;
+  }
+  if (settings.navMode == NAV_MODE_WHOLE_ROUTE)
+  {
+    isSilenced = true;
+  }
+}
+
+bool navSilenced()
+{
+  return isSilenced;
+}
+
+// from the house task: a mode picked on the glass switched the phone link on or off
+void navHouseTick()
+{
+  if (!isRestartWanted)
+  {
+    return;
+  }
+  isRestartWanted = false;
+  navRestart();
 }
 
 // ---------------------------------------------------------------------------
@@ -426,7 +491,7 @@ void navTick()
   portENTER_CRITICAL(&navMux);
   // the app repeats the turn every 10 s while navigating: nothing for NAV_TIMEOUT_MS means it's gone (phone flat,
   // Maps closed, out of range)
-  if (latest.navigating && now - latestMs > NAV_TIMEOUT_MS)
+  if (latest.navigating && (int32_t)(now - latestMs) > NAV_TIMEOUT_MS) // signed: a turn stored after `now` was read
   {
     latest.navigating = false;
     changeCount++;
@@ -443,13 +508,19 @@ void navTick()
   }
   portEXIT_CRITICAL(&navMux);
 
+  // the route ended: a card sent away in Route shows again for the next one
+  if (!navigating)
+  {
+    isSilenced = false;
+  }
+
   // should the card be up?
   bool wanted = false;
   if (testUntilMs != 0)
   {
     wanted = true; // Show Test Turn, whatever the setting
   }
-  else if (navigating && navWanted() && !runtime.standby)
+  else if (navigating && navWanted() && !runtime.standby && !isSilenced)
   {
     if (settings.navMode == NAV_MODE_WHOLE_ROUTE)
     {

@@ -106,7 +106,7 @@ void kwp2000SetTiming(uint16_t p3MinMs, uint8_t p4Ms);
 // give its limits, fallbackValues (P2min P2max P3min P3max P4min, 5 bytes, ISO units) are set; NULL = don't set.
 // When the ECU accepts, our P3 becomes its P3min and our P4 testerP4Ms. true = the ECU took the new timing.
 bool kwp2000AccessTiming(const uint8_t *fallbackValues, uint8_t testerP4Ms);
-bool kwp2000ReadPid(uint8_t pid, uint8_t *data, uint8_t &len); // mode 01
+bool kwp2000ReadPid(uint8_t pid, uint8_t *data, uint8_t dataSize, uint8_t &len); // mode 01 (data holds dataSize bytes)
 // 0.38.0: OBD-II fault codes over the K-line, any make (session to 0x33): mode 0x03 stored / 0x07 pending -> the raw
 // 2-byte codes (each once, from every ECU that answers); answered = an ECU gave a positive answer at all
 uint8_t kwp2000ReadObdCodes(uint8_t mode, uint16_t *codes, uint8_t maxCodes, bool &answered);

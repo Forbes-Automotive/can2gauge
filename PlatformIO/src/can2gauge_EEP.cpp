@@ -70,7 +70,7 @@ static void dsgReadOff(DsgReadSpec &spec)
   spec.scale = 1.0f;
 }
 
-// every setting as a new gauge has it, in the order of the Settings struct (used on first run and by Factory Reset)
+// every setting as a new gauge has it (used on first run and by Factory Reset)
 void setDefaults(Settings &target)
 {
   memset(&target, 0, sizeof(target)); // anything not set below starts at 0 / "" / off
@@ -161,7 +161,6 @@ void setDefaults(Settings &target)
 
   // ===== Menu and web UI tabs =====
   target.menuMask = MENU_ALL;
-  target.tabsShown = TAB_SHOW_ALL;
 
   // ===== CAN bus =====
   target.canEnabled = 1;
@@ -520,6 +519,18 @@ void readEEP()
   {
     DEBUG("EEP: no settings of this layout (%u bytes stored) - defaults", (unsigned)len);
     setDefaults(settings);
+    // 0.39.7: the paired OBD adapter is kept under its own name too (see writeEEP), so an update with a new settings
+    // layout doesn't unpair it. Paired = used, as pairing it does.
+    if (prefs.isKey("elmMac"))
+    {
+      prefs.getString("elmMac", settings.elmMac, sizeof(settings.elmMac));
+      settings.elmAddrType = prefs.getUChar("elmType", 0);
+      if (settings.elmMac[0] != '\0')
+      {
+        settings.elmEnabled = 1;
+        DEBUG("EEP: kept the paired OBD adapter %s", settings.elmMac);
+      }
+    }
     prefs.putBytes("cfg", &settings, sizeof(Settings));
   }
   // 0.38.0: the Drag Timer is new on the menu. A gauge set up before it has no bit for it in menuMask, so it's switched
@@ -554,6 +565,8 @@ void writeEEP()
   prefs.putUInt("sharedRev", sharedSettingsRev); // 0.30.4: the shared settings' revision (can2gauge_Shared.h)
   prefs.putBytes("ignMac", ignitionGaugeMac, 6);  // 0.30.10: the gauge followed for the ignition
   prefs.putUChar("bootGauges", bootGaugeCount);   // 0.30.14: gauges on CAN at power-up (the boot sync's handshake)
+  prefs.putString("elmMac", settings.elmMac);     // 0.39.7: the paired OBD adapter, kept through a settings layout
+  prefs.putUChar("elmType", settings.elmAddrType); //         change (readEEP); "" after a factory reset or Forget
   prefs.end();
   lastSave = millis();
   if (saveMutex)
@@ -576,8 +589,9 @@ void eepTick()
 // ---------------------------------------------------------------------------
 // JSON
 // ---------------------------------------------------------------------------
+// the "menu" JSON's switch names, in uiMenuItem_t order (the web UI's Menu and Tabs uses the same names)
 static const char *menuKeys[MENU_ITEM_COUNT] = {"haldex", "can", "kline", "output", "dsg", "ble", "chain", "gauges", "adc",
-                                                "drag"}; // 0.38.0: + the drag timer
+                                                "drag", "nav", "ecu", "oil", "triggers"};
 
 static void specToJson(JsonObject specObj, const DsgReadSpec &spec)
 {
@@ -713,10 +727,6 @@ void settingsToJson(JsonDocument &doc)
   {
     menuObj[menuKeys[menuItem]] = (stored.menuMask >> menuItem) & 1;
   }
-  // web UI tabs with no item on the screen's menu
-  menuObj["oil"] = (stored.tabsShown & TAB_SHOW_OIL) ? 1 : 0;
-  menuObj["ecu"] = (stored.tabsShown & TAB_SHOW_ECU) ? 1 : 0;
-  menuObj["triggers"] = (stored.tabsShown & TAB_SHOW_TRIGGERS) ? 1 : 0;
 
   JsonObject canObj = doc["can"].to<JsonObject>();
   canObj["enabled"] = stored.canEnabled;
@@ -930,33 +940,6 @@ void settingsToJson(JsonDocument &doc)
     copyStr(field, len, obj[key].as<const char *>()); \
     changed = true;                                   \
   }
-
-// one web UI tab switch from the "menu" JSON (1 / true = shown) into settings.tabsShown (a set bit = shown)
-static void tabFromJson(JsonObjectConst menuObj, const char *key, uint8_t showBit, uint8_t &tabsShown, bool &changed)
-{
-  if (!menuObj[key].is<int>() && !menuObj[key].is<bool>())
-  {
-    return; // not in this document: leave it
-  }
-  bool shown = false;
-  if (menuObj[key].is<bool>())
-  {
-    shown = menuObj[key].as<bool>();
-  }
-  else
-  {
-    shown = menuObj[key].as<int>() != 0;
-  }
-  if (shown)
-  {
-    tabsShown = tabsShown | showBit;
-  }
-  else
-  {
-    tabsShown = tabsShown & ~showBit;
-  }
-  changed = true;
-}
 
 static bool specFromJson(JsonObjectConst specObj, DsgReadSpec &spec)
 {
@@ -1195,10 +1178,6 @@ bool settingsFromJson(const JsonDocument &doc)
       }
       changed = true;
     }
-    // the web UI tabs that aren't on the screen's menu
-    tabFromJson(menuObj, "oil", TAB_SHOW_OIL, target.tabsShown, changed);
-    tabFromJson(menuObj, "ecu", TAB_SHOW_ECU, target.tabsShown, changed);
-    tabFromJson(menuObj, "triggers", TAB_SHOW_TRIGGERS, target.tabsShown, changed);
   }
 
   JsonObjectConst canObj = doc["can"];
@@ -1498,9 +1477,12 @@ bool settingsFromJson(const JsonDocument &doc)
     SET_STR(wifiObj, "hostname", target.hostname, NAME_LEN);
   }
 
-  // learnt: only the paired adapter can be set (a backup carries it); the rest the gauge works out itself
+  // learnt: only the paired adapter can be set (a backup carries it); the rest the gauge works out itself. 0.39.7: a
+  // backup made before the adapter was paired carries none ("") and left the gauge unpaired after Import Backup: an
+  // empty one now leaves the paired adapter alone (Forget Adapter and Factory Reset still unpair it).
   JsonObjectConst learntObj = doc["learnt"];
-  if (!learntObj.isNull())
+  const char *learntMac = learntObj["elmMac"] | "";
+  if (!learntObj.isNull() && learntMac[0] != '\0')
   {
     SET_STR(learntObj, "elmMac", target.elmMac, sizeof(target.elmMac));
     SET_U8(learntObj, "elmAddrType", target.elmAddrType);
@@ -1630,7 +1612,7 @@ bool settingsFromJson(const JsonDocument &doc)
   {
     target.dsgGearbox = GEARBOX_DSG; // 0.26.0
   }
-  unitsSanitize(target); // 0.27.0: the units and their six rows
+  unitsSanitise(target); // 0.27.0: the units and their six rows
   for (DsgReadSpec *spec : {&target.dsgSpeed, &target.dsgGear, &target.dsgTemp, &target.dsgLockup, &target.dsgSelector})
   {
     if (spec->svc != 0x22 && spec->svc != 0x01)
@@ -1707,6 +1689,10 @@ bool settingsFromJson(const JsonDocument &doc)
     if (value.bitLen < 1 || value.bitLen > 32)
     {
       value.bitLen = 8; // a number of 1 to 32 bits (anything longer isn't one value)
+    }
+    if (value.bitPos > 2040)
+    {
+      value.bitPos = 0; // past the longest answer the gauge keeps (256 bytes), as the web UI's box allows
     }
     if (value.field < 1 || value.field > 4)
     {
@@ -1785,7 +1771,6 @@ bool settingsFromJson(const JsonDocument &doc)
   {
     target.bootFadeMs = 2000; // the web UI allows 100..5000 ms: back to the new-gauge fade
   }
-  target.tabsShown &= TAB_SHOW_ALL;
   if (target.klineFastObd > 1)
   {
     target.klineFastObd = 0;
