@@ -1,0 +1,1 @@
+{ "name": "FsUnzip", "version": "1.0.0", "description": "can2gauge 0.24.0: reads files that ship zipped on LittleFS (name.gz) and unzips raw deflate blocks (sprite frames) with the ESP32-S3 ROM's tinfl", "frameworks": "arduino", "platforms": "espressif32" }

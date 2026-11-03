@@ -1,0 +1,8 @@
+{
+  "name": "ME7Read",
+  "version": "0.1.0",
+  "description": "ME7 ECU flash read over K-line (KWP2000 upload). Self-contained: depends only on KLine. To remove the feature delete this folder, src/can2gauge_ME7Read.cpp, include/can2gauge_ME7Read.h, data/me7read.js, and the references to them (the me7ReadService()/include in can2gauge_KLine.cpp, the ME7Read block in can2gauge_API.cpp, the #me7read-card in data/index.html).",
+  "dependencies": { "KLine": "*" },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

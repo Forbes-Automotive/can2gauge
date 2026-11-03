@@ -1,0 +1,1 @@
+{ "name": "TCA9554", "version": "1.0.0", "description": "TCA9554 I2C expander (LCD_RST / TP_RST / LCD_CS / CAN_TERM_EN) for can2gauge", "frameworks": "arduino", "platforms": "espressif32" }

@@ -1,0 +1,23 @@
+{
+  "product": "can2gauge",
+  "latest": "0.36.14",
+  "releases": [
+    {
+      "version": "0.36.14",
+      "channel": "stable",
+      "date": "2026-10-31",
+      "ota": true,
+      "notes": "First public release: 8 gauge pages in 12 styles from CAN, K-line, OBD (wired or Bluetooth / WiFi dongle), adc2can, usb2ip ECUs and UDS / TP2.0 diagnostics with a DID library; daisy chain with gauge-to-gauge updates, triggers, data logger, fault codes and module scan.",
+      "firmware": {
+        "path": "V0.36.14/firmware.bin",
+        "size": 3272032,
+        "sha256": "50a9059f2ba94d558e9fd99291f270f6bf05bc207dd80bc11ea9fea6ec5ee696"
+      },
+      "filesystem": {
+        "path": "V0.36.14/littlefs.bin",
+        "size": 9830400,
+        "sha256": "c96664c448522a5c159df2459e99542710292a8f6ba7aca9beae9fd4dcf0403b"
+      }
+    }
+  ]
+}

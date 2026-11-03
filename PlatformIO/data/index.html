@@ -1,0 +1,1506 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>can2gauge</title>
+    <script>
+        // 0.38.0: the page's first question to the gauge, asked while the rest is still loading: is the First Boot Setup
+        // still to do? Then a cover says so straight away (firstboot.js takes it off when its tab opens), instead of the
+        // main page showing first and First Boot arriving once app.js has loaded everything. firstboot.js uses this answer.
+        window.fbEarlyState = fetch("/api/firstboot").then(function (answer) {
+            return answer.json();
+        }).then(function (state) {
+            if (state && state.state !== "done") {
+                document.documentElement.classList.add("fb-pending");
+                setTimeout(function () { document.documentElement.classList.remove("fb-pending"); }, 30000); // never stuck
+            }
+            return state;
+        }).catch(function () {
+            return null; // older firmware, or no answer: firstboot.js asks again itself
+        });
+    </script>
+    <link rel="stylesheet" href="style.css?v=%FW_VERSION%">
+    <link rel="stylesheet" href="uPlot.min.css?v=%FW_VERSION%">
+    <link rel="stylesheet" href="logview.css?v=%FW_VERSION%">
+    <style>
+        /* can2gauge additions on top of the shared theme */
+        /* 0.38.0: the First Boot cover (see fbEarlyState) */
+        #fbCover { display: none; }
+        html.fb-pending #fbCover { display: flex; position: fixed; inset: 0; z-index: 1000; background: var(--bg); flex-direction: column;
+            align-items: center; justify-content: center; gap: 10px; }
+        .fb-cover-title { color: var(--text); font-size: 22px; font-weight: 700; }
+        .fb-cover-text { color: var(--muted); font-size: 15px; }
+        .row-inline { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-bottom: 14px; }
+        .log-channels { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 10px; } /* 180px: one per line on a phone, so the names can be read */
+        .row-inline > .form-group { margin-bottom: 0; } /* buttons line up with the fields beside them */
+        /* one height for every field and button in a row, so dropdowns, inputs and buttons sit level */
+        .row-inline select, .row-inline input[type="text"], .row-inline input[type="number"], .row-inline input[type="password"],
+        .row-inline > .btn, .row-inline > .btn-secondary, .row-inline .form-group > .btn { min-height: 42px; }
+        /* a button's text never wraps (that made it taller than the rest of its row): a long one moves to its own line */
+        .row-inline > .btn, .row-inline > .btn-secondary { white-space: nowrap; }
+        .pg-src { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+        .pg-src > * { flex: 1 1 140px; margin-bottom: 0; }
+        .pg-src .narrow { flex: 0 1 90px; }
+        .live-head { color: var(--muted); font-size: 13px; margin: -4px 0 10px; }
+        /* the DSG view on the gauge: selector strip, the big selector + gear, the gears with the engaged one lit */
+        .dsg-mimic { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 16px auto 6px; padding: 18px 12px;
+            width: min(340px, 100%); border-radius: 50%; aspect-ratio: 1; justify-content: center; background: #000; border: 2px solid var(--line); }
+        .dsg-strip, .dsg-gears { display: flex; gap: 10px; font-weight: 700; color: var(--muted); }
+        .dsg-strip span { font-size: 22px; } .dsg-gears span { font-size: 15px; min-width: 22px; text-align: center; border-radius: 6px; padding: 2px 0; }
+        .dsg-strip .on { color: var(--accent); } .dsg-gears .on { color: #000; background: var(--accent); }
+        .dsg-big { font-size: 72px; font-weight: 800; color: var(--text); line-height: 1; }
+        .adc-row { border-top: 1px solid var(--line); padding: 12px 0 2px; }
+        .adc-row h3 { display: flex; gap: 12px; align-items: baseline; margin: 0 0 8px; font-size: 14px; }
+        .adc-live { font-family: ui-monospace, Consolas, monospace; color: var(--accent); font-size: 14px; }
+        .adc-chip { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+        .adc-chip.bad { color: #ff4d5e; border-color: #ff4d5e; } .adc-chip.ok { color: var(--ok, #3fd07f); border-color: var(--ok, #3fd07f); }
+        .row-inline > * { flex: 1 1 120px; }
+        .row-inline .narrow { flex: 1 1 100px; } /* number boxes stretch with the row instead of sitting small on the left */
+        /* 0.17.0: a dropdown is never squeezed in beside another one on a phone: it asks for 180px, so two of them don't
+           fit side by side on a phone and each gets a line of its own (on a laptop they still share the row).
+           ":has(select)" means "a field that has a dropdown in it". */
+        .row-inline > .form-group:has(select), .pg-src > .form-group:has(select) { flex: 1 1 180px; }
+        .row-inline .narrow:has(select) { flex: 1 1 120px; } /* a short list (Units, Mode) can sit beside a number box */
+        .row-inline > .full { flex: 1 1 100%; } /* always a line of its own (a file picker) */
+        .row-inline > .form-group.wide { flex: 1 1 260px; } /* long choices: no button squeezed in beside it on a phone */
+        .row-inline > .form-group:has(input[type="file"]) { flex: 1 1 100%; } /* a file picker: its own line, button below */
+        .help a { color: var(--accent); }
+        /* "Illumination: On" - a live state as one line of text, with its green / red dot */
+        .state-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 14px; color: var(--muted); margin: 0 0 14px; }
+        .state-line b { color: var(--text); font-weight: 600; }
+        .state-line .sep { margin: 0 6px; }
+        /* 0.36.12: Daisy Chain tab - the gauge list sits a little under its "This gauge" line, and the update list has a gap above its buttons */
+        #chainNodes { margin-top: 8px; }
+        #chainUpdList { margin-bottom: 14px; }
+        /* a list entry with its text first and its button underneath (sprite packs) */
+        .stack-row { padding: 8px 0 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+        /* the Log tab's memory bar (the same as adc2can's): how full the recording memory is */
+        .mem-bar { height: 10px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; margin: 6px 0 4px; }
+        .mem-bar div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+        .stack-row .btn-secondary { margin-top: 8px; min-height: 34px; padding: 6px 14px; }
+        @media (max-width: 760px) {
+            /* phone: a button that ends up on a line of its own fills it, like the fields around it (!important beats
+               the fixed widths written on some buttons for the laptop layout) */
+            .row-inline > .btn, .row-inline > .btn-secondary { flex-grow: 1 !important; }
+            /* phone: every dropdown gets the whole width so its choice can be read (a short one marked narrow - Units,
+               Mode - can still share) */
+            .row-inline > .form-group:has(select):not(.narrow), .pg-src > .form-group:has(select):not(.narrow) { flex-basis: 100%; }
+        }
+        .list-item { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel-2); }
+        .list-item h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .out-btn { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 12px; }
+        .out-btn.sel { color: var(--text); border-color: var(--accent); background: rgba(36,209,196,.12); }
+        .out-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .out-row .name { width: 44px; font-weight: 700; }
+        .dot-on { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--line); margin-right: 6px; }
+        .dot-on.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+        .dot-on.off { background: var(--danger); box-shadow: 0 0 6px var(--danger); } /* off / nothing heard */
+        /* 0.17.1: a fault (the output's driver has shut it down) - an orange dot that flashes once a second */
+        .dot-on.fault { background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); animation: dotflash 1s infinite; }
+        @keyframes dotflash { 50% { opacity: .15; } } /* half way through each second the dot fades nearly out */
+        .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre; overflow: auto; max-height: 260px; color: var(--text); }
+        .file-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+        .file-row a { color: var(--accent); text-decoration: none; }
+        /* 0.20.0: the ME7 logged-variable checkbox list */
+        #me7CfgList { max-height: 320px; overflow-y: auto; margin-top: 4px; }
+        .me7cfg-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer; color: var(--text); }
+        .me7cfg-row input { flex: 0 0 auto; width: 17px; height: 17px; }
+        .help { color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 6px; }
+        /* one look for every button: same font, weight and height (the small list buttons are one size too) */
+        .btn, .btn-secondary, .mode-btn, .out-btn { font-family: inherit; font-size: 13px; font-weight: 600; min-height: 42px; }
+        .file-row .btn-secondary, .found-row .btn-secondary { min-height: 34px; padding: 6px 14px; flex: 0 0 auto; }
+        .out-btn { min-height: 34px; padding: 6px 14px; border-radius: 10px; }
+        .btn:disabled, .btn-secondary:disabled { opacity: .45; cursor: not-allowed; }
+        .sig-live { font-variant-numeric: tabular-nums; }
+        .page-card.disabled { opacity: .5; }
+        .menu-toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 14px; }
+        .big-sel { font-size: 44px !important; font-weight: 700; }
+        .found-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+        .found-row .likely { color: var(--accent); }
+        .spec-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; margin: 6px 0 4px; }
+        /* 0.17.5: K-line "Live on this page" - the switch with the block number beside it, the two step buttons under
+           them (half each), then Find... All of it 420px wide at most, so on a laptop it stays together on the left */
+        .kl-live-row, .kl-step-row, .kl-find { max-width: 420px; }
+        .kl-live-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+        .kl-live-row input[type="number"] { flex: 0 0 90px; width: 90px; min-height: 42px; text-align: center; }
+        .kl-step-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .kl-step-row .btn-secondary { flex: 1 1 0; }
+        /* Find...: the matches drop down under the box, over whatever is below it */
+        .kl-find { position: relative; }
+        .kl-find input[type="text"] { min-height: 42px; }
+        .kl-find-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; max-height: 300px; overflow-y: auto;
+            background: var(--panel-2); border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+        .kl-find-item { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line);
+            background: none; color: var(--text); font-family: inherit; font-size: 13px; cursor: pointer; }
+        .kl-find-item:last-child { border-bottom: 0; }
+        .kl-find-item:hover, .kl-find-item.sel { background: rgba(36, 209, 196, .12); }
+        .kl-find-item b { color: var(--accent); font-weight: 600; margin-right: 8px; } /* "Block 3 / 1" */
+        .kl-find-item span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; } /* the block's title */
+        .kl-find-empty { padding: 9px 12px; color: var(--muted); font-size: 13px; }
+        .kl-details-row { margin: 2px 0 4px; }
+        /* the block being read: a title line, then one line per value - name on the left, value + unit on the right.
+           With "Show Formula and Spec" on, a small grey line under each value holds the rest. */
+        .kl-block:empty { display: none; }
+        .kl-block { margin-top: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 2px 12px; }
+        .kl-block-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 2px 10px;
+            padding: 9px 0; border-bottom: 1px solid var(--line); color: var(--text); font-size: 14px; font-weight: 600; }
+        .kl-block-head .kl-age { color: var(--muted); font-size: 12px; font-weight: 400; }
+        .kl-field { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px;
+            padding: 9px 0; border-bottom: 1px solid var(--line); }
+        .kl-field:last-child { border-bottom: 0; }
+        .kl-name { flex: 1 1 150px; min-width: 0; color: var(--muted); font-size: 13px; }
+        .kl-value { color: var(--accent); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .kl-value small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 4px; }
+        .kl-detail { flex: 1 1 100%; color: var(--muted); font-size: 12px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+        .kl-note { padding: 9px 0; color: var(--muted); font-size: 13px; }
+        .kl-text { padding: 9px 0; font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: var(--text); word-break: break-all; }
+        .theme-box { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 8px 0 12px; }
+        .theme-box canvas { border-radius: 50%; background: #000; flex: 0 0 auto; max-width: 100%; }
+        .theme-side { flex: 1 1 220px; }
+        #themeInfo { font-size: 13px; color: var(--text); }
+        #themeInfo .conf { color: var(--muted); font-size: 12px; }
+        /* Haldex tab + the Dashboard's menu tiles */
+        .hdx-link { font-size: 13px; color: var(--muted); margin: -4px 0 12px; }
+        .hdx-link b { color: var(--text); }
+        .hdx-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+        .hdx-chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+        .hdx-chip.on { color: var(--accent); border-color: var(--accent); }
+        .hdx-chip.warn { color: #ffb020; border-color: #ffb020; }
+        .hdx-chip.bad { color: #ff4d5e; border-color: #ff4d5e; }
+        .stale { opacity: .45; }
+        .hdx-goto { color: var(--accent); }
+        .mode-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+        .mode-tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); cursor: pointer; min-width: 0; }
+        .mode-tile:hover { border-color: var(--accent); }
+        .mode-tile h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin: 0 0 6px; display: flex; align-items: center; gap: 6px; }
+        .mode-tile .v { font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mode-tile .s { font-size: 12px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
+        /* 0.23.0: Basic / Advanced. Basic (the default) keeps the fine-tuning out of the way: the ".adv" part of a card
+           sits behind its "More Options" button, and cards / tabs marked "adv-card" / "adv-tab" only show once the
+           Advanced switch is on (that puts the class "show-adv" on the page's body). */
+        .adv { display: none; border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 4px; }
+        .adv.open, body.show-adv .adv { display: block; }
+        body.show-adv .more-btn { display: none; } /* everything is showing: no fold buttons */
+        body:not(.show-adv) .adv-card, body:not(.show-adv) .nav-tab.adv-tab { display: none !important; } /* ":not" = "without" */
+        .more-btn { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; min-height: 40px;
+            color: var(--accent); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .more-btn .chev { display: inline-block; transition: transform .2s; }
+        .more-btn.open .chev { transform: rotate(180deg); } /* the arrow points up while open */
+        .adv-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
+        /* the help text on a card hides behind an (i) button on the card's title; tap it to read */
+        .card > h2.has-tip { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .tip-btn { flex: 0 0 auto; width: 30px; height: 30px; margin: -6px -4px -6px 0; border-radius: 50%; border: 1px solid var(--line);
+            background: var(--panel-2); color: var(--muted); font-family: Georgia, serif; font-style: italic; font-weight: 700;
+            font-size: 15px; line-height: 1; text-transform: none; cursor: pointer; }
+        .tip-btn::after { content: "i"; } /* "::after" = drawn by the CSS, not text in the page */
+        .tip-btn:hover, .card.tips-open .tip-btn { color: var(--accent); border-color: var(--accent); }
+        .card > .help.tip { display: none; }
+        .card.tips-open > .help.tip { display: block; }
+        /* Settings: the section chips along the top, one section's cards showing at a time */
+        .sec-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; } /* all five in view: a second line on a phone */
+        .sec-chip { flex: 0 0 auto; padding: 9px 14px; min-height: 40px; border-radius: 999px; border: 1px solid var(--line);
+            background: var(--panel-2); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .sec-chip.active { color: var(--accent); border-color: var(--accent); }
+        .sec-hidden { display: none !important; }
+        /* the Gauges tab: one line per gauge (number, label, what it shows), tap it to open the gauge's settings */
+        .page-card { padding: 0; }
+        .page-card.open { border-color: var(--accent); }
+        .pg-head { display: flex; align-items: center; gap: 6px; padding-right: 12px; }
+        .pg-open { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 6px 10px 12px; min-height: 58px;
+            background: none; border: 0; color: var(--text); font-family: inherit; text-align: left; cursor: pointer; }
+        .pg-num { flex: 0 0 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); display: flex; align-items: center;
+            justify-content: center; color: var(--accent); font-size: 13px; font-weight: 700; }
+        .pg-text { flex: 1 1 auto; min-width: 0; }
+        .pg-name { display: block; font-size: 15px; font-weight: 600; }
+        .pg-sum { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .pg-chev { color: var(--muted); font-size: 16px; transition: transform .2s; }
+        .page-card.open .pg-chev { transform: rotate(180deg); }
+        .pg-body { display: none; padding: 12px; border-top: 1px solid var(--line); }
+        .page-card.open .pg-body { display: block; }
+        /* the Advanced switch at the bottom of the phone menu, under Tools */
+        .nav-adv { margin-top: 18px; padding: 2px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+        .nav-adv .toggle { min-height: 44px; font-weight: 600; }
+        /* phone layout (narrow screens): the tab row becomes a menu button in the top bar that opens the pages in groups,
+           and the status badges become coloured dots (tap them for the full text). A PC keeps the tab row. */
+        .menu-btn, .nav-sheet { display: none; }
+        @media (max-width: 760px) {
+            .topbar { flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
+            .nav-tabs { display: none; }
+            .menu-btn { display: flex; align-items: center; gap: 8px; margin-left: auto; padding: 7px 12px; border-radius: 999px;
+                border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+            .menu-btn .burger { color: var(--accent); font-size: 16px; line-height: 1; }
+            .status-bar { gap: 6px; cursor: pointer; }
+            .status-bar:not(.expanded) .status-badge { font-size: 0; padding: 0; width: 10px; height: 10px; border: none; background: var(--muted); }
+            .status-bar:not(.expanded) .status-badge.ok { background: var(--ok); }
+            .status-bar:not(.expanded) .status-badge.warn { background: var(--accent-2); }
+            .status-bar:not(.expanded) .status-badge.error { background: var(--danger); }
+            .status-bar:not(.expanded) #verStatus { display: none; }
+            .status-bar.expanded { order: 3; flex-basis: 100%; } /* the full badges get a line of their own */
+            .nav-sheet.open { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; overflow-y: auto;
+                overscroll-behavior: contain; padding: 4px 16px 24px; background: rgba(11, 15, 20, .97); }
+            /* 0.36.8: while the menu is open the page behind it can't scroll (at the menu's bottom a swipe used to carry on
+               into the page under it); overscroll-behavior above keeps the menu's own scroll from passing through */
+            html.nav-open, body.nav-open { overflow: hidden; overscroll-behavior: none; }
+            .nav-group h4 { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; margin: 14px 0 8px; }
+            .nav-group .items { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+            .nav-item { padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+                font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+            .nav-item.active { color: var(--accent); border-color: var(--accent); }
+            .menu-toggles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } /* 0.23.0: two switches a line */
+        }
+    </style>
+</head>
+
+<body>
+    <!-- 0.38.0: shown while a First Boot Setup is still to do, until its tab opens (the main page loads underneath) -->
+    <div id="fbCover"><div class="fb-cover-title">First Boot Setup</div><div class="fb-cover-text">Getting the gauge ready...</div></div>
+    <div class="container">
+        <header class="topbar">
+            <h1>can2gauge</h1>
+            <div class="status-bar" id="statusBar">
+                <span class="status-badge" id="canStatus">CAN: --</span>
+                <span class="status-badge" id="haldexStatus" style="display:none">OpenHaldex: --</span>
+                <span class="status-badge" id="klineStatus">K-line: --</span>
+                <span class="status-badge" id="bleStatus">OBD: --</span>
+                <span class="status-badge" id="chainStatus">Chain: --</span>
+                <span class="status-badge" id="verStatus">v--</span>
+            </div>
+            <!-- phone only: opens the pages in groups (the tab row below is hidden on a narrow screen) -->
+            <button class="menu-btn" id="menuBtn" aria-expanded="false"><span class="burger">&#9776;</span><span id="menuPage">Dashboard</span></button>
+        </header>
+
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-page="dashboard">Dashboard</button>
+            <button class="nav-tab" data-page="gauges">Gauges</button>
+            <button class="nav-tab" data-page="log">Log</button>
+            <button class="nav-tab" data-page="nav">Navigation</button> <!-- 0.30.5: own tab (was on Bluetooth OBD) -->
+            <button class="nav-tab" data-page="can" data-menu="can">CAN</button>
+            <button class="nav-tab" data-page="haldex" data-menu="haldex">OpenHaldex</button>
+            <button class="nav-tab" data-page="adc" data-menu="adc">ADC</button>
+            <button class="nav-tab" data-page="ecu" data-menu="ecu">usb2ip</button>
+            <button class="nav-tab" data-page="kline" data-menu="kline">K-line / ME7</button>
+            <button class="nav-tab" data-page="oil" data-menu="oil">Oil</button>
+            <button class="nav-tab" data-page="dsg" data-menu="dsg">Gearbox</button>
+            <button class="nav-tab adv-tab" data-page="vdiag">Diagnostics</button> <!-- adv-tab: only with Advanced on -->
+            <button class="nav-tab" data-page="service">Service</button>
+            <button class="nav-tab" data-page="ble" data-menu="ble">Bluetooth OBD</button>
+            <button class="nav-tab" data-page="triggers" data-menu="triggers">Triggers</button>
+            <button class="nav-tab" data-page="chain" data-menu="chain">Daisy Chain</button>
+            <button class="nav-tab" data-page="carscan">Scan My Car</button> <!-- 0.37.5: its own tab (was on Gauges), carscan.js -->
+            <button class="nav-tab" data-page="settings">Settings</button>
+            <button class="nav-tab adv-tab" data-page="diag">System</button>
+            <button class="nav-tab" data-page="ota">OTA</button>
+        </nav>
+        <div class="nav-sheet" id="navSheet"></div> <!-- phone menu: filled by app.js from the tabs above -->
+
+
+        <!-- ================= DASHBOARD ================= -->
+        <div class="page active" id="dashboard-page">
+            <section class="card adv-card"> <!-- 0.38.0: Advanced only (a stand-in until the screens have touch); 0.38.1: first on the Dashboard -->
+                <h2>Gauge control</h2>
+                <div class="row-inline">
+                    <!-- 0.38.0: a pretend finger on the screen (until the screens have touch): Previous / Next are swipes -->
+                    <button class="btn" data-action="swipeRight">&#9664; Previous Gauge</button>
+                    <button class="btn" data-action="swipeLeft">Next Gauge &#9654;</button>
+                    <button class="btn" data-action="tap">Single Tap</button>
+                    <button class="btn" data-action="doubleTap">Double Tap</button>
+                    <button class="btn" data-action="longPress">Long Press</button>
+                    <button class="btn-secondary" data-action="clearAlerts">Clear Alerts</button>
+                    <button class="btn-secondary" data-action="testAlert">Test Alert</button>
+                </div>
+                <div class="help" id="alertNow"></div>
+                <div class="help">These work the screen as a finger would, for screens without touch: Previous / Next Gauge swipe (the next page, or the next item on the menu), the taps and Long Press press the middle (Long Press opens the menu, or goes back to it).</div>
+            </section>
+
+            <section class="card" id="modeTilesCard" style="display:none">
+                <h2>Status</h2>
+                <div class="mode-tiles" id="modeTiles"></div>
+                <div class="help">Green = on, red = off or not heard, flashing orange = fault. Tap a tile for its tab.</div>
+            </section>
+
+            <!-- only shown while an OpenHaldex is heard (app.js pollStatus) -->
+            <section class="card" id="haldexCard" style="display:none">
+                <h2>OpenHaldex</h2>
+                <div class="mode-grid">
+                    <button class="mode-btn" data-mode="0">Stock</button>
+                    <button class="mode-btn" data-mode="1">FWD</button>
+                    <button class="mode-btn" data-mode="2">50:50</button>
+                    <button class="mode-btn" data-mode="3">60:40</button>
+                    <button class="mode-btn" data-mode="4">75:25</button>
+                    <button class="mode-btn" data-mode="5">Expert</button>
+                </div>
+                <div class="engagement-display">
+                    <div class="engagement-label">
+                        <span>Target: <span id="lockTarget">--</span>%</span>
+                        <span>Actual: <span id="lockActual">--</span>%</span>
+                    </div>
+                    <div class="engagement-bar-wrap">
+                        <div class="engagement-bar"><div class="engagement-fill" id="engagementFill"></div></div>
+                    </div>
+                </div>
+                <div class="help" id="hdxDashInfo"></div>
+                <div class="help"><a href="#" class="hdx-goto" data-goto="haldex">More on the OpenHaldex tab</a></div>
+            </section>
+
+            <section class="card">
+                <h2>Live data</h2>
+                <div class="live-head" id="liveHead">--</div>
+                <div class="gauge-grid" id="liveGrid"></div>
+            </section>
+
+        </div>
+
+        <!-- ================= GAUGES ================= -->
+        <div class="page" id="gauges-page">
+            <section class="card">
+                <h2>Gauges (swipe order)</h2>
+                <div class="help">Tap a gauge to change it; its switch shows or hides it on the glass, and Move Up / Move Down change the order. Swipe left / right on the screen between the gauges switched on. Pick a source, then the value from it: Car lists everything Scan My Car found (its own tab); a second value (Dual, Haldex) comes from the same source. Picking a value fills in its range and decimals: change them, the redline (turns the gauge red) and the sprite under More Options.</div>
+                <div id="pagesList"></div>
+            </section>
+        </div>
+
+        <!-- ================= SCAN MY CAR (0.37.5: carscan.js builds its card here) ================= -->
+        <div class="page" id="carscan-page"></div>
+
+        <!-- ================= LOG (data logger, 0.16.0: logtab.js + the shared logview.js) ================= -->
+        <div class="page" id="log-page">
+            <section class="card">
+                <h2>Recording</h2>
+                <div class="row-inline" data-nosave>
+                    <button class="btn" id="logStartBtn">Start Recording</button>
+                    <button class="btn-secondary" id="logStopBtn">Stop Recording</button>
+                    <button class="btn-secondary" id="logCsvBtn">Download CSV</button>
+                    <button class="btn-secondary" id="logClearBtn">Clear Recording</button>
+                </div>
+                <div class="state-line"><span class="dot-on" id="logDot"></span>Recording: <b id="logState">--</b></div>
+                <label>Recording memory</label>
+                <div class="mem-bar"><div id="logMemFill"></div></div>
+                <div class="help" id="logMemInfo" style="margin-top:0">--</div>
+                <div class="help" id="logFetchState"></div>
+                <div class="help">The recording lives in the gauge's memory and is lost at power off: download it first. The CSV opens in Excel, MegaLogViewer or Datazap.</div>
+            </section>
+            <section class="card">
+                <h2>Graphs</h2>
+                <div id="logGraphs"></div>
+                <div class="help">One graph per value on one time line. Drag across a graph to zoom with a mouse, or use the buttons. A gap means that value's source wasn't sending.</div>
+            </section>
+            <section class="card" id="logSetupCard">
+                <h2>Channels</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Channels</label><select id="log.manualChannels"><option value="0">Active Gauges</option><option value="1">Chosen Below</option></select></div>
+                    <div class="form-group"><label>Samples</label><select id="log.rateHz"></select></div>
+                    <div class="form-group"><label>Auto Start</label><select id="log.autoStart"><option value="0">Off - start it here</option><option value="1">On - recording from power-up</option></select></div>
+                </div>
+                <div class="help" id="logGaugeHelp">Records the values your gauge pages show, in gauge order. Switch to Chosen Below to pick your own.</div>
+                <div id="logChannelPick">
+                    <div class="log-channels" id="logChannels"></div>
+                    <div class="help">Any value the gauge has: CAN, K-line, OBD, diagnostics, ME7, ADC, usb2ip or a gauge page's own value. Changes apply at the next Start.</div>
+                </div>
+            </section>
+            <!-- 0.38.0: the drag timer's scoreboard (logtab.js dragRender) -->
+            <section class="card" id="dragCard">
+                <h2>Drag Timer</h2>
+                <div class="help">On the screen: menu &gt; Drag Timer. Tap to start: a 5 second countdown, then the flag drops (or the clock starts the moment the car moves). It stops at 100 km/h, or 60 mph when Speed is set to mph. Tap to cancel, double-tap for the scores. The best 10 times of each kind are kept here.</div>
+                <div id="dragBoards"></div>
+            </section>
+        </div>
+
+        <!-- ================= NAVIGATION (0.30.5: own tab, was a card on Bluetooth OBD) ================= -->
+        <div class="page" id="nav-page">
+            <section class="card" id="navCard">
+                <h2>Google Maps Turns</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Nav Link</label><select id="nav.mode"><option value="0">Off</option><option value="1">On - pops up as a turn gets close</option><option value="2">On - shows for the whole route</option></select></div>
+                    <div class="form-group narrow"><label>Pop-up Distance (m)</label><input type="number" id="nav.popupM" min="10" max="2550" step="10"></div>
+                </div>
+                <div class="state-line">Phone: <b id="navState">--</b></div>
+                <div class="help" id="navNow"></div>
+                <div class="help" id="navRestartRow" hidden>The nav link was switched on after the gauge started, while
+                    Bluetooth was already busy (the OBD adapter) or short of memory. It starts first after a restart. <button class="btn-secondary"
+                    id="navRestart">Restart Now</button></div>
+                <div class="row-inline"><button class="btn-secondary" id="navTest">Show Test Turn</button></div>
+                <div class="help">Google Maps' next turn on the glass, laid out like Android Auto: the arrow, the distance, the road and the arrival time. It needs the can2gauge Link app on an Android phone (notification access and Bluetooth allowed), then any Google Maps route. A tap on the glass hides the card until the next turn. While this is on, Bluetooth starts at power-up.</div>
+                <div class="help">The app links to the first gauge it finds with this on, so in a daisy chain switch it on in one gauge only. It runs alongside a Bluetooth OBD adapter (two connections at once).</div>
+            </section>
+        </div>
+
+        <!-- ================= HALDEX ================= -->
+        <div class="page" id="haldex-page">
+            <section class="card">
+                <h2>OpenHaldex (live)</h2>
+                <div class="hdx-link" id="hdxLink">--</div>
+                <div class="mode-grid">
+                    <button class="mode-btn" data-mode="0">Stock</button>
+                    <button class="mode-btn" data-mode="1">FWD</button>
+                    <button class="mode-btn" data-mode="2">50:50</button>
+                    <button class="mode-btn" data-mode="3">60:40</button>
+                    <button class="mode-btn" data-mode="4">75:25</button>
+                    <button class="mode-btn" data-mode="5">Expert</button>
+                </div>
+                <div class="engagement-display">
+                    <div class="engagement-label">
+                        <span>Target: <span id="hdxTarget">--</span>%</span>
+                        <span>Actual: <span id="hdxActual">--</span>%</span>
+                    </div>
+                    <div class="engagement-bar-wrap">
+                        <div class="engagement-bar"><div class="engagement-fill" id="hdxFill"></div></div>
+                    </div>
+                </div>
+                <div class="gauge-grid" id="hdxTiles" style="margin-top:14px"></div>
+                <div class="hdx-chips" id="hdxFlags"></div>
+                <div class="help" id="hdxSlip"></div>
+            </section>
+
+            <section class="card" id="hdxCtlCard">
+                <h2>OpenHaldex controls</h2>
+                <div class="help" id="hdxCtlNote"></div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Haldex generation</label><select id="hdxGen" data-nosave>
+                        <option value="1">Generation 1</option>
+                        <option value="2">Generation 2</option>
+                        <option value="4">Generation 4</option>
+                        <option value="50">Generation 5 (0CQ)</option>
+                        <option value="52">Generation 5 (0CQ VAQ)</option>
+                        <option value="51">Generation 5 (0AY)</option>
+                        <option value="41">Generation 4 - GM/SAAB</option>
+                    </select></div>
+                    <div class="form-group"><label>Controller</label><select id="hdxCtrl" data-nosave><option value="1">Enabled</option><option value="0">Disabled (stock)</option></select></div>
+                </div>
+                <div class="spec-title">Learn Haldex</div>
+                <div class="row-inline">
+                    <button class="btn" id="hdxLearnStart">Start Learn</button>
+                    <button class="btn-secondary" id="hdxLearnCancel">Cancel</button>
+                    <button class="btn-secondary" id="hdxLearnClear">Clear Learned Table</button>
+                </div>
+                <div class="engagement-bar-wrap"><div class="engagement-bar"><div class="engagement-fill" id="hdxLearnFill"></div></div></div>
+                <div class="help" id="hdxLearnState">--</div>
+                <div class="spec-title">Long learn</div>
+                <div class="row-inline">
+                    <label class="toggle" style="flex:1 1 260px"><input type="checkbox" id="hdxLongAll" data-nosave><span class="toggle-slider"></span><span class="toggle-label">Also test the default (core) blocks</span></label>
+                    <button class="btn" id="hdxLongStart">Start Long Learn</button>
+                    <button class="btn-secondary" id="hdxLongCancel">Cancel</button>
+                </div>
+                <div class="help" id="hdxLongState">--</div>
+                <div class="help" id="hdxCmdState"></div>
+                <div class="help">Sent over WiFi. Generation, Learn and Clear only work with the car stopped. Full learn results are in the OpenHaldex's own web UI.</div>
+            </section>
+
+            <section class="card">
+                <h2>OpenHaldex link</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Over WiFi (ESP-NOW)</label><select id="haldex.wireless"><option value="1">On</option><option value="0">Off - CAN only</option></select></div>
+                    <div class="form-group"><label>Its speed / rpm / boost / pedal</label><select id="haldex.carSignals"><option value="1">Use while the gauge has no other source</option><option value="0">Never</option></select></div>
+                    <div class="form-group"><label>OpenHaldex WiFi password</label><input type="password" id="haldex.key" autocomplete="off"></div>
+                </div>
+                <div class="help" id="hdxFollow">--</div>
+                <div id="hdxOthers"></div>
+                <div class="row-inline"><button class="btn-secondary" id="hdxForget" style="flex:0 1 220px">Forget This OpenHaldex</button></div>
+                <div class="help">No CAN wire needed: the OpenHaldex sends its state over WiFi. Commands need its WiFi password and "Allow Gauges to Change Settings" on. Both must be on the same WiFi channel.</div>
+            </section>
+        </div>
+
+        <!-- ================= ADC (adc2can) ================= -->
+        <div class="page" id="adc-page">
+            <section class="card" id="adcCard">
+                <h2>ADC - adc2can sensor expander</h2>
+                <div class="row-inline">
+                    <div class="form-group" style="flex:0 1 180px"><label>adc2can base id (hex)</label><input type="text" id="adc.baseId" data-hex="1"></div>
+                    <div class="form-group" style="flex:0 1 220px"><label>Also over WiFi (ESP-NOW)</label><select id="adc.wireless"><option value="1">On - no CAN wire needed</option><option value="0">Off - CAN only</option></select></div>
+                </div>
+                <div id="adcBoards"></div><!-- 0.36.6: one line per board this gauge takes (pollAdc) -->
+                <div class="help">Eight 0-5 V sensors per adc2can board; the sensors of a board show once it's heard. Sensor settings live on the adc2can: edit them below (over CAN) and every gauge uses them. Over WiFi the sensors show without a CAN wire, but settings can only be changed over CAN.</div>
+            </section>
+            <section class="card">
+                <h2>Sensors</h2>
+                <div id="adcList"></div>
+            </section>
+        </div>
+
+        <!-- ================= ECU (usb2ip) ================= -->
+        <div class="page" id="ecu-page">
+            <section class="card" id="ecuCard">
+                <h2>usb2ip (ECU over WiFi)</h2>
+                <div class="hdx-link" id="ecuLink">--</div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Over WiFi (ESP-NOW)</label><select id="ecu.wireless"><option value="1">On</option><option value="0">Off</option></select></div>
+                    <div class="form-group"><label>Its rpm / boost / coolant ...</label><select id="ecu.carSignals"><option value="1">Use while the gauge has no other source</option><option value="0">Never</option></select></div>
+                </div>
+                <div class="hdx-chips" id="ecuChips"></div>
+                <div class="spec-title">Everyday values</div>
+                <div class="gauge-grid" id="ecuValues"></div>
+                <div class="help" id="ecuFollow">--</div>
+                <div id="ecuOthers"></div>
+                <div class="row-inline"><button class="btn-secondary" id="ecuForget" style="flex:0 1 220px">Forget This usb2ip</button></div>
+                <div class="help">usb2ip sends an Ignitron, MaxxECU, Link, Haltech or EMU PRO's data over WiFi. Everyday values fill in when nothing else provides them; every ECU channel can go on a gauge (Source = ECU). Same WiFi channel needed.</div>
+            </section>
+        </div>
+
+        <!-- ================= TRIGGERS ================= -->
+        <div class="page" id="triggers-page">
+            <section class="card">
+                <h2>Set points</h2>
+                <div id="trigList"></div>
+                <div class="help">Signal lists only what this gauge has: the car's values, a gauge page's own values (Page values: whatever a page reads from a DBC, K-line, OBD, ECU, Diagnostics or ME7, set up on the Gauges tab), and the adc2can, usb2ip and OpenHaldex values once they've been heard. A trigger keeps its value read even when its page isn't showing or is switched off. K-line talks to one module at a time: when the pages and triggers use more than one module, a trigger's K-line value is only read while a page from the same module is on screen.</div>
+                <div class="help">Hold = how long it must last. Hysteresis = how far back before it re-arms. Latch = stays on until the glass is tapped (or Clear Alerts); tapping an alert away keeps it quiet until its value is back past the threshold. No Reading = what to do when the value has none (a sensor unplugged, shorted or faulted, the bus gone quiet): Ignore waits, Trigger counts it as the condition met (from 5 s after power-on).</div>
+            </section>
+        </div>
+
+        <!-- ================= CAN ================= -->
+        <div class="page" id="can-page">
+            <section class="card">
+                <h2>CAN bus</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Enabled</label><select id="can.enabled"><option value="1">Yes</option><option value="0">No</option></select></div>
+                    <div class="form-group"><label>Bit rate</label><select id="can.kbps"><option value="125">125 kbps</option><option value="250">250 kbps</option><option value="500">500 kbps</option><option value="1000">1 Mbps</option></select></div>
+                    <div class="form-group"><label>Profile</label><select id="can.profile"><option value="0">VAG PQ (listen)</option><option value="3">VAG MQB (listen)</option><option value="5">VAG MLB - Audi A6 / A7 C7, A8 D4, Q5 8R (listen)</option><option value="1">OBD-II PIDs (request)</option><option value="4">MaxxECU (listen)</option><option value="2">OpenHaldex only</option></select></div>
+                    <div class="form-group"><label>120R termination</label><select id="can.termination"><option value="2">Auto (on only if the bus is silent)</option><option value="0">Off (mid-chain)</option><option value="1">On (last gauge)</option></select></div>
+                </div>
+                <div class="help">Termination: a CAN bus needs a 120R resistor at each end. In a car the car's wiring has them, so leave it Auto or Off. Auto listens at power-up: any CAN frame heard means the bus is terminated already and it stays off; nothing heard (gauges on their own, on the bench) and the first gauge to give up listening switches its 120R on, so the others hear a live bus and leave theirs off. If car frames turn up later it goes off again. On: always, for the last gauge on a chain with nothing else terminating it.</div>
+                <div class="help" id="canRelayInfo"></div>
+                <div class="adv"> <!-- 0.23.0: under More Options in Basic -->
+                    <div class="row-inline">
+                        <div class="form-group"><label>Frames relayed over WiFi</label><select id="can.relay"><option value="1">Use (OpenHaldex / adc2can)</option><option value="0">Ignore</option></select></div>
+                    </div>
+                    <div class="row-inline">
+                        <div class="form-group"><label>OpenHaldex broadcast ID (hex)</label><input type="text" id="haldex.broadcastId" data-hex="1"></div>
+                        <div class="form-group"><label>OpenHaldex control ID (hex)</label><input type="text" id="haldex.controlId" data-hex="1"></div>
+                        <div class="form-group" id="maxxBox"><label>MaxxECU base ID (hex)</label><input type="text" id="can.maxxBaseId" data-hex="1"></div>
+                    </div>
+                    <div class="help" id="maxxHelp">MaxxECU: in MTune turn on CAN output "MaxxECU Default 1.3" at this bit rate. Base ID 520 unless MTune's CAN ID offset moves it.</div>
+                    <div class="help">Relayed frames: an OpenHaldex or adc2can can pass the car's CAN to this gauge over WiFi.</div>
+                </div>
+            </section>
+            <section class="card" id="canObdCard">
+                <h2>OBD-II over CAN</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>OBD-II PIDs</label><select id="obd.overCan"><option value="0">Off</option><option value="1">On, next to the profile</option></select></div>
+                    <div class="form-group"><label>ECU to read</label><select id="obd.ecu"><option value="0">Engine (first to answer)</option><option value="1">0x7E8 engine</option><option value="2">0x7E9 gearbox</option><option value="3">0x7EA</option><option value="4">0x7EB</option><option value="5">0x7EC</option><option value="6">0x7ED</option><option value="7">0x7EE</option><option value="8">0x7EF</option></select></div>
+                </div>
+                <div class="state-line">Reading: <b id="obdCanEcu">--</b><span class="sep">&middot;</span>PIDs a second: <b class="sig-live" id="obdCanRate">--</b></div>
+                <div class="help" id="obdCanHeard"></div>
+                <div class="help">Asks the engine for standard OBD-II values (intake air, timing, MAF ...) alongside the profile's own frames. Only needed with VAG PQ / MQB / MaxxECU; only the chain master asks.</div>
+            </section>
+            <section class="card" id="canDbcCard">
+                <h2>Car / DBC</h2>
+                <div class="help" id="dbcNow">Checking the gauge...</div>
+                <div class="spec-title">Best matches for what's on the bus</div>
+                <div id="dbcMatches" class="help">Listening...</div>
+                <div class="spec-title">On the gauge</div>
+                <div id="dbcSlots"></div>
+                <div class="spec-title">Pick one yourself</div>
+                <div class="row-inline" data-nosave>
+                    <div class="form-group wide"><label>DBC</label><select id="dbcPick"></select></div>
+                    <div class="form-group narrow"><label>Into</label><select id="dbcSlot"><option value="1">Slot 1 - car / engine</option><option value="2">Slot 2 - gearbox</option><option value="3">Slot 3 - extra</option></select></div>
+                    <button class="btn" id="dbcLoad">Load to Gauge</button>
+                </div>
+                <div class="row-inline" data-nosave>
+                    <div class="form-group"><label>Or your own .dbc file</label><input type="file" id="dbcFile" accept=".dbc"></div>
+                    <button class="btn" id="dbcUpload">Convert + Load</button>
+                </div>
+                <div class="help">The gauge's CAN screen decodes messages with these DBCs (raw bytes without one). Up to three at once, e.g. an ECU in slot 1 and a gearbox in slot 2; two DBCs can't share an ID. <b>Gauge</b> DBCs (the aftermarket ECUs, and VW MQB / MLB) feed the gauge's own values straight away (rpm, coolant, gear ...). For an ECU whose CAN base ID was moved in its software, set the base on its slot. Matches compare the IDs on the bus with the library; "explains" counts most.</div>
+            </section>
+            <section class="card adv-card"> <!-- adv-card: only with Advanced on -->
+                <h2>IDs on the bus</h2>
+                <div class="mono" id="canIds">--</div>
+            </section>
+            <section class="card adv-card">
+                <h2>Statistics</h2>
+                <div class="gauge-grid">
+                    <div class="gauge"><div class="gauge-label">RX</div><div class="gauge-value" id="canRx">--</div><div class="gauge-unit">frames</div></div>
+                    <div class="gauge"><div class="gauge-label">RX rate</div><div class="gauge-value" id="canRate">--</div><div class="gauge-unit">/s</div></div>
+                    <div class="gauge"><div class="gauge-label">TX</div><div class="gauge-value" id="canTx">--</div><div class="gauge-unit">frames</div></div>
+                    <div class="gauge"><div class="gauge-label">Errors</div><div class="gauge-value" id="canErr">--</div><div class="gauge-unit">bus-off <span id="canBusOff">0</span></div></div>
+                    <div class="gauge" id="canObdBox"><div class="gauge-label">OBD PIDs</div><div class="gauge-value" id="canObdRate">--</div><div class="gauge-unit" id="canObdInfo">/s</div></div>
+                </div>
+            </section>
+            <section class="card adv-card">
+                <h2>Recent frames</h2>
+                <div class="mono" id="canRecent">--</div>
+            </section>
+        </div>
+
+        <!-- ================= K-LINE ================= -->
+        <div class="page" id="kline-page">
+            <section class="card">
+                <h2>K-line</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Protocol</label><select id="kline.protocol"><option value="0">Off</option><option value="1">KWP1281 (VAG measuring blocks)</option><option value="2">KWP2000 / OBD-II PIDs</option><option value="3">ME7 logger (.ecu/.cfg)</option><option value="4">KWP2000 VAG (fast blocks, KWP1281 fallback)</option></select></div>
+                    <div class="form-group" id="klAddrBox"><label>ECU address (hex)</label><input type="text" id="kline.ecuAddr" data-hex="1"></div>
+                    <!-- 0.17.6: with the ME7 logger the address is the .ecu's Connect= line: shown here, not a setting -->
+                    <div class="form-group" id="klEcuAddrBox" style="display:none" data-nosave><label>ECU address (from the .ecu)</label><input type="text" id="klEcuAddr" readonly></div>
+                    <div class="form-group" id="klBaudBox"><label>Baud (KWP2000)</label><select id="kline.baud"><option value="10400">10400 - standard</option><option value="9600">9600</option><option value="4800">4800</option></select></div>
+                    <!-- 0.17.6: with the ME7 logger the baud is the .ecu's LogSpeed: shown here, not a setting -->
+                    <div class="form-group" id="klEcuBaudBox" style="display:none" data-nosave><label>Baud (from the .ecu)</label><input type="text" id="klEcuBaud" readonly></div>
+                    <div class="form-group" id="klFastObdBox"><label>Fast OBD (KWP2000)</label><select id="kline.fastObd"><option value="0">Off - standard gaps (55 ms)</option><option value="1">On - shorter gaps (bench test)</option></select></div>
+                </div>
+                <div class="row-inline">
+                    <button class="btn-secondary" data-action="klineRestart">Reconnect</button>
+                </div>
+                <div class="help">Address 01 = engine, 10 = ME7 fast init, 33 = OBD-II. Fast OBD drops back to standard gaps by itself if the ECU misses answers.</div>
+            </section>
+            <!-- 0.37.7: moved from the Bluetooth OBD tab (elm.extraSource 1, elm.klAddr, elm.klFast) -->
+            <section class="card" id="klAdapterCard">
+                <h2>K-line Through the OBD Adapter</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Use the Adapter's K-line</label><select id="klViaAdapter" data-nosave><option value="0">Off</option><option value="1">On - VAG engine blocks</option></select></div>
+                    <div class="form-group narrow"><label>Module (hex)</label><input type="text" id="elm.klAddr" data-hex="1"></div>
+                    <div class="form-group"><label>Init</label><select id="elm.klFast"><option value="0">5-baud (VAG modules)</option><option value="1">Fast init (ISO 14230)</option></select></div>
+                </div>
+                <div class="help">For a car on the K-line with no wire to the gauge: the OBD adapter reads the engine's measuring blocks (KWP2000 modules only; KWP1281 needs the gauge's own K-line wire). The adapter then reads these instead of OBD PIDs.</div>
+            </section>
+            <section class="card" id="klModeCard">
+                <h2>K-line mode (gauge menu &gt; K-Line)</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Module</label><select id="klModeSel" data-nosave>
+                        <option value="1">01 Engine</option><option value="2">02 Gearbox</option><option value="3">03 ABS</option>
+                        <option value="8">08 Climate</option><option value="21">15 Airbag</option><option value="22">16 Steering wheel</option>
+                        <option value="23">17 Instruments</option><option value="25">19 Gateway</option><option value="34">22 AWD (Haldex)</option>
+                        <option value="37">25 Immobiliser</option><option value="53">35 Central locking</option><option value="55">37 Navigation</option>
+                        <option value="70">46 Comfort</option><option value="85">55 Headlights</option><option value="86">56 Radio</option>
+                        <option value="101">65 Tyre pressure</option><option value="118">76 Park assist</option>
+                        <option value="custom">Other address...</option></select></div>
+                    <div class="form-group narrow" id="klModeCustomBox"><label>Address (hex)</label><input type="text" id="kline.modeAddr" data-hex="1"></div>
+                </div>
+                <div class="help">Pick the module, then open K-Line from the gauge's menu: swipe for the next measuring block. Field names come from the module's label file.</div>
+                <div class="spec-title">Live on this page</div>
+                <!-- 0.17.5: the switch with the block number beside it, the two step buttons under them side by side -->
+                <div class="kl-live-row" data-nosave>
+                    <label class="toggle"><input type="checkbox" id="klLive"><span class="toggle-slider"></span><span class="toggle-label">Read Blocks Here</span></label>
+                    <input type="number" id="klGoto" min="1" max="255" title="Block number">
+                </div>
+                <div class="kl-step-row" data-nosave>
+                    <button class="btn-secondary" id="klPrev">&lsaquo; Block</button>
+                    <button class="btn-secondary" id="klNext">Block &rsaquo;</button>
+                </div>
+                <!-- 0.17.5: Find... - type part of a value's name, pick it from the list and the gauge goes to its block -->
+                <div class="kl-find" data-nosave>
+                    <input type="text" id="klFind" placeholder="Find..." autocomplete="off" spellcheck="false">
+                    <div class="kl-find-list" id="klFindList" style="display:none"></div>
+                </div>
+                <div class="help" id="klLiveState">Off - tick "Read Blocks Here" (or open K-Line on the gauge).</div>
+                <div class="row-inline" data-nosave id="klLabelRow" style="display:none">
+                    <div class="form-group"><label>Label file</label><select id="klLabelSel"></select></div>
+                </div>
+                <div class="kl-details-row" data-nosave id="klDetailsRow" style="display:none">
+                    <label class="toggle"><input type="checkbox" id="klDetails"><span class="toggle-slider"></span><span class="toggle-label">Show Formula and Spec</span></label>
+                </div>
+                <div class="kl-block" id="klLiveBlock"></div>
+            </section>
+            <section class="card" id="me7Card">
+                <h2>ME7 logger</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>ME7 .ecu file</label><select id="me7.ecuFile"></select></div>
+                    <div class="form-group"><label>ME7 .cfg file</label><select id="me7.cfgFile"></select></div>
+                    <div class="form-group narrow"><label>Samples/s</label><input type="number" id="me7.sps" min="1" max="50"></div>
+                    <div class="form-group"><label>Log to CSV on connect</label><select id="me7.logToFile"><option value="0">No</option><option value="1">Yes</option></select></div>
+                    <div class="form-group narrow"><label>Fast log (RAM)</label><select id="me7.fast" title="Experimental: Fast writes a small routine into ECU RAM so one request reads every value (higher rate). Bench first: Test link proves it works - the ECU should answer C2G! (no engine data). Normal and Fast are saved; Test link is one-off."><option value="0">Normal</option><option value="1">Test link (C2G!)</option><option value="2">Fast</option></select></div>
+                </div>
+                <div class="row-inline">
+                    <button class="btn-secondary" data-action="me7Start">Start CSV Log</button>
+                    <button class="btn-secondary" data-action="me7Stop">Stop CSV Log</button>
+                </div>
+                <div class="state-line"><span class="dot-on" id="me7Dot"></span>Logging: <b id="me7State">--</b></div>
+                <div id="me7CfgPick" style="display:none;margin-top:14px">
+                    <label style="display:block;margin-bottom:6px">Logged Variables <b id="me7CfgCount"></b></label>
+                    <div class="form-group" style="margin-bottom:8px"><input type="text" id="me7CfgFind" data-nosave placeholder="Find a variable to add (name, alias or unit)"></div>
+                    <div id="me7CfgList"></div>
+                    <div class="help" style="margin-top:6px">Tick a variable to log it, untick to drop it (up to 32). The list is saved to the .cfg and the logged variables show in the gauge-page sources.</div>
+                </div>
+                <div class="help">For protocol "ME7 logger". Upload the .ecu (from ME7Info) and .cfg under Files below. The baud comes from the .ecu (LogSpeed). Samples/s is the most it asks for: an ME7 answers one request every ~10 ms, each holding 3 stretches of memory - variables next to each other share one - so the example's 11 variables take 3 requests (~34/s) and 6 or so neighbouring ones reach 50/s.</div>
+            </section>
+            <section class="card">
+                <h2>Status</h2>
+                <div class="gauge-grid">
+                    <div class="gauge"><div class="gauge-label">State</div><div class="gauge-value" id="klState" style="font-size:16px">--</div></div>
+                    <div class="gauge"><div class="gauge-label">Samples</div><div class="gauge-value" id="klSamples">--</div><div class="gauge-unit"><span id="klRate">--</span>/s</div></div>
+                    <div class="gauge"><div class="gauge-label">CSV</div><div class="gauge-value" id="klLog" style="font-size:14px">--</div></div>
+                </div>
+                <div class="mono" id="me7Vars" style="display:none;margin-top:12px"></div>
+            </section>
+            <section class="card">
+                <h2>Files</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Upload a .ecu / .cfg file</label><input type="file" id="fileUpload"></div>
+                    <button class="btn" id="fileUploadBtn" style="flex:0 1 140px">Upload</button>
+                </div>
+                <div id="fileList"></div>
+                <div class="help" id="fsUsage"></div>
+                <div class="help">Your files only (ME7 files, logs, flash reads, your logo). The web UI's own files can't be deleted.</div>
+            </section>
+
+            <!-- ===== ME7 flash read (optional feature; remove this card + me7read.js to drop the UI) ===== -->
+            <section class="card adv-card" id="me7read-card">
+                <h2>Read ECU flash (.bin)</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Init</label><select id="m7r.fastInit"><option value="0">Slow (ME7.5, e.g. 06A906032, 8N0906018)</option><option value="1">Fast (ME7.1)</option></select></div>
+                    <div class="form-group narrow"><label>Address (hex)</label><input type="text" id="m7r.address" value="0x01" data-hex="1"></div>
+                    <div class="form-group"><label>Baud</label><select id="m7r.baud"><option value="10400">10400 (safest, ~30 min)</option><option value="38400">38400</option><option value="56000" selected>56000 (~5 min)</option><option value="124800">124800 (fastest, verify first)</option></select></div>
+                    <div class="form-group narrow"><label>512 KB check</label><select id="m7r.mirror"><option value="1" selected>Yes</option><option value="0">No</option></select></div>
+                    <div class="form-group narrow"><label>Verify</label><select id="m7r.verify"><option value="1" selected>Yes</option><option value="0">No</option></select></div>
+                    <div class="form-group narrow"><label>RAM unlock</label><select id="m7r.ramUnlock"><option value="0" selected>No</option><option value="1">Locked ECU</option></select></div>
+                    <div class="form-group narrow"><label>Permit (hex)</label><input type="text" id="m7r.permit" value="0x26A2" data-hex="1" title="Only used if the plain 0x23 read fails (modified flash) - per-ECU permit value (06A..HJ 0x26A2, 022 0x2620, 8N0 0x25B4)"></div>
+                </div>
+                <div class="row-inline">
+                    <button class="btn" id="m7rStart">Start Read</button>
+                    <button class="btn-secondary" id="m7rCancel">Cancel</button>
+                    <span class="sig-live" id="m7rState">idle</span>
+                </div>
+                <div class="engagement-bar-wrap" style="margin-top:10px"><div class="engagement-bar"><div class="engagement-fill" id="m7rBar" style="width:0%"></div></div></div>
+                <div class="help" id="m7rInfo"></div>
+                <div class="help" id="m7rDownload"></div>
+                <div class="help" style="margin-top:8px;color:var(--accent-2)">Engine off, ignition on, battery on a charger. Reading changes nothing, but turn the key off and on before starting the engine.</div>
+            </section>
+        </div>
+
+        <!-- ================= OIL (OEM) ================= -->
+        <div class="page" id="oil-page">
+            <section class="card">
+                <h2>OEM oil temperature / level (live)</h2>
+                <div class="gauge-grid">
+                    <div class="gauge"><div class="gauge-label">Oil temp</div><div class="gauge-value sig-live" id="oilTemp">--</div><div class="gauge-unit" id="oilTempUnit">C</div></div>
+                    <div class="gauge"><div class="gauge-label">Oil level</div><div class="gauge-value" id="oilLevel" style="font-size:22px">--</div><div class="gauge-unit" id="oilLevelSrc">--</div></div>
+                    <div class="gauge"><div class="gauge-label">Source</div><div class="gauge-value" id="oilSrc" style="font-size:16px">--</div><div class="gauge-unit" id="oilConn">--</div></div>
+                    <div class="gauge"><div class="gauge-label">Oil gauge</div><div class="gauge-value" id="oilPageState" style="font-size:16px">--</div><div class="gauge-unit" id="oilPageNo">--</div></div>
+                </div>
+                <div class="help" id="oilStatusLine"></div>
+                <div class="mono" id="oilRaw"></div>
+                <div class="row-inline" style="margin-top:10px">
+                    <button class="btn" id="oilAddPage">Add Oil Gauge</button>
+                    <button class="btn-secondary" id="oilShowPage">Show It Now</button>
+                </div>
+                <div class="help">Adds a gauge with the "Oil (PQ)" style: temperature, level (OK / LOW) and connection status.</div>
+            </section>
+            <section class="card">
+                <h2>Source</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Oil temp / level from</label><select id="oil.source"><option value="0">CAN - cluster broadcast mKombi_2 0x420 (passive, temperature only)</option><option value="1">K-line - cluster measuring block, KWP1281 (temperature + level)</option></select></div>
+                </div>
+                <div id="oilCanBox">
+                    <div class="spec-title">CAN (mKombi_2 0x420)</div>
+                    <div class="help">Listens only. Needs the VAG PQ profile and a CAN cluster (1J0 920, not 1J0 919). Temperature only - pick K-line for the level. <span id="oilCanCheck"></span></div>
+                </div>
+                <div id="oilKlBox">
+                    <div class="spec-title">K-line (KWP1281 to the cluster)</div>
+                    <div class="row-inline">
+                        <div class="form-group narrow"><label>Cluster address (hex)</label><input type="text" id="oil.clusterAddr" data-hex="1"></div>
+                        <div class="form-group"><label>Measuring block</label><select id="oilGroupSel"><option value="0">Auto (from the cluster part number)</option><option value="3">003 - 1J0 920 / 3B0 920 (coolant, level, oil temp)</option><option value="50">050 - 1J0 919, TT 8N, Beetle 1C0 (oil temp only)</option><option value="custom">Custom</option></select></div>
+                        <div class="form-group narrow"><label>Block number</label><input type="number" id="oil.group" min="0" max="255"></div>
+                        <div class="form-group narrow"><label>Temp field</label><select id="oil.tempField"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
+                        <div class="form-group narrow"><label>Level field</label><select id="oil.levelField"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option><option value="255">none</option></select></div>
+                    </div>
+                    <div class="row-inline">
+                        <div class="form-group"><label>Level is OK when the raw byte is</label><select id="oil.levelOkZero"><option value="0">non-zero (default)</option><option value="1">zero</option></select></div>
+                        <div class="form-group narrow"><label>Read every (ms)</label><input type="number" id="oil.pollMs" min="100" max="1000"></div>
+                    </div>
+                    <div class="help">The cluster is only read while the oil gauge is on the glass (2-3 s to connect). Auto picks the block from the part number. Flip "Level is OK when" if it reads LOW on a full sump.</div>
+                </div>
+            </section>
+            <section class="card">
+                <h2>Which cars have it</h2>
+                <div class="help" style="margin-top:0">Cars with the <b>G266</b> sump sender: cluster coding (address 17) 4th digit 1 or 2. Most UK / EU Mk4s have it, few North American cars do.</div>
+            </section>
+        </div>
+
+        <!-- ================= DSG ================= -->
+        <div class="page" id="dsg-page">
+            <section class="card">
+                <h2>Gearbox (live)</h2>
+                <div class="gauge-grid">
+                    <div class="gauge"><div class="gauge-label">Selector</div><div class="gauge-value big-sel" id="dsgSel">--</div><div class="gauge-unit">as on the gauge</div></div>
+                    <div class="gauge"><div class="gauge-label">Gearbox speed</div><div class="gauge-value" id="dsgTcu">--</div><div class="gauge-unit">km/h (UDS / TP2.0 / ELM)</div></div>
+                    <div class="gauge"><div class="gauge-label">Vehicle speed</div><div class="gauge-value" id="dsgVeh">--</div><div class="gauge-unit">km/h (CAN / OBD)</div></div>
+                    <div class="gauge"><div class="gauge-label">Gearbox temp</div><div class="gauge-value" id="dsgTemp">--</div><div class="gauge-unit">&deg;C (CAN or diagnostic read)</div></div>
+                    <div class="gauge"><div class="gauge-label">Lock-up</div><div class="gauge-value" id="dsgLockup">--</div><div class="gauge-unit" id="dsgLockupRaw">converter / clutch</div></div>
+                    <div class="gauge"><div class="gauge-label">Input speed</div><div class="gauge-value" id="dsgInput">--</div><div class="gauge-unit" id="dsgSlip">rpm (turbine)</div></div>
+                </div>
+                <div class="dsg-mimic" id="dsgMimic">
+                    <div class="dsg-strip" id="dsgStrip"></div>
+                    <div class="dsg-big" id="dsgBig">--</div>
+                    <div class="dsg-gears" id="dsgGears"></div>
+                </div>
+                <div class="help" id="dsgState"></div>
+                <div class="mono" id="dsgFields"></div>
+            </section>
+            <section class="card">
+                <h2>Gearbox source</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Gearbox type</label><select id="dsg.gearbox"><option value="0">DSG (VW / Audi)</option><option value="1">ZF 8HP - Audi / VW</option><option value="2">ZF 8HP - BMW (F / G-series)</option></select></div>
+                    <div class="form-group"><label>Diagnostic read</label><select id="dsg.source"><option value="0">None - CAN broadcast only</option><option value="1">UDS on CAN (MQB, 7E1 / 7E9)</option><option value="2">TP2.0 on CAN (PQ35 DQ250)</option><option value="3">UDS via Bluetooth ELM327</option><option value="4">TP2.0 via Bluetooth ELM327 (PQ35, raw CAN)</option></select></div>
+                    <div class="form-group"><label>Speed shown</label><select id="dsg.speedPref"><option value="0">Gearbox, else vehicle</option><option value="1">Gearbox only</option><option value="2">Vehicle only</option></select></div>
+                    <div class="form-group narrow"><label>Poll gap (ms)</label><input type="number" id="dsg.pollMs" min="20" max="2000"></div>
+                </div>
+                <div class="help">Selector and gear come from the CAN profile's broadcast; the diagnostic read adds the gearbox's own speed. Picking a gearbox type fills in the reads below for it (change any of them after). On a BMW the gearbox only answers through the Bluetooth adapter or on the OBD port's CAN (D-CAN), with its address in front of every frame.</div>
+
+                <div id="dsgUdsBox">
+                <div class="spec-title">UDS (CAN or ELM)</div>
+                <div class="row-inline">
+                    <div class="form-group narrow"><label>Request id (hex)</label><input type="text" id="dsg.txId" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Response id (hex)</label><input type="text" id="dsg.rxId" data-hex="1"></div>
+                    <div class="form-group"><label>Session</label><select id="dsg.session"><option value="1">Default (no session change)</option><option value="3">Extended 10 03 + TesterPresent</option></select></div>
+                    <div class="form-group narrow"><label>Address byte out (hex, 0 off)</label><input type="text" id="dsg.txExtAddr" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Address byte back (hex, 0 off)</label><input type="text" id="dsg.rxExtAddr" data-hex="1"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Speed read preset</label><select id="spdPreset"><option value="f40d">22 F40D - OBD speed as a UDS DID (1 byte km/h)</option><option value="010d">01 0D - OBD mode 01 speed</option><option value="custom">Custom</option></select></div>
+                    <div class="form-group narrow"><label>Service</label><select id="spd.svc"><option value="0">Off</option><option value="34">22 (DID)</option><option value="1">01 (PID)</option></select></div>
+                    <div class="form-group narrow"><label>DID / PID (hex)</label><input type="text" id="spd.id" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Byte</label><input type="number" id="spd.pos" min="0" max="60"></div>
+                    <div class="form-group narrow"><label>Length</label><select id="spd.len"><option value="1">1</option><option value="2">2</option></select></div>
+                    <div class="form-group narrow"><label>Scale</label><input type="number" id="spd.scale" step="any"></div>
+                    <div class="form-group narrow"><label>Offset</label><input type="number" id="spd.offset" step="any"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Gear read preset</label><select id="gearPreset"><option value="off">Off - gear from the CAN broadcast</option><option value="01a4">01 A4 - OBD actual gear (SAE, rarely supported)</option><option value="custom">Custom</option></select></div>
+                    <div class="form-group narrow"><label>Service</label><select id="gear.svc"><option value="0">Off</option><option value="34">22 (DID)</option><option value="1">01 (PID)</option></select></div>
+                    <div class="form-group narrow"><label>DID / PID (hex)</label><input type="text" id="gear.id" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Byte</label><input type="number" id="gear.pos" min="0" max="60"></div>
+                    <div class="form-group narrow"><label>Format</label><select id="gear.fmt"><option value="0">Raw x scale</option><option value="1">High nibble</option></select></div>
+                    <div class="form-group narrow"><label>Scale</label><input type="number" id="gear.scale" step="any"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Temperature read</label><select id="temp.svc"><option value="0">Off</option><option value="34">22 (DID)</option><option value="1">01 (PID)</option></select></div>
+                    <div class="form-group narrow"><label>DID / PID (hex)</label><input type="text" id="temp.id" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Byte</label><input type="number" id="temp.pos" min="0" max="60"></div>
+                    <div class="form-group narrow"><label>Length</label><select id="temp.len"><option value="1">1</option><option value="2">2</option></select></div>
+                    <div class="form-group narrow"><label>Scale</label><input type="number" id="temp.scale" step="any"></div>
+                    <div class="form-group narrow"><label>Offset</label><input type="number" id="temp.offset" step="any"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Lock-up read</label><select id="lockup.svc"><option value="0">Off</option><option value="34">22 (DID)</option><option value="1">01 (PID)</option></select></div>
+                    <div class="form-group narrow"><label>DID / PID (hex)</label><input type="text" id="lockup.id" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Byte</label><input type="number" id="lockup.pos" min="0" max="60"></div>
+                    <div class="form-group narrow"><label>Length</label><select id="lockup.len"><option value="1">1</option><option value="2">2</option></select></div>
+                    <div class="form-group narrow"><label>Format</label><select id="lockup.fmt"><option value="0">Raw x scale</option><option value="2">Gearbox type's table</option></select></div>
+                    <div class="form-group narrow"><label>Scale</label><input type="number" id="lockup.scale" step="any"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Selector read</label><select id="selector.svc"><option value="0">Off</option><option value="34">22 (DID)</option><option value="1">01 (PID)</option></select></div>
+                    <div class="form-group narrow"><label>DID / PID (hex)</label><input type="text" id="selector.id" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Byte</label><input type="number" id="selector.pos" min="0" max="60"></div>
+                    <div class="form-group narrow"><label>Length</label><select id="selector.len"><option value="1">1</option><option value="2">2</option></select></div>
+                    <div class="form-group narrow"><label>Format</label><select id="selector.fmt"><option value="0">Raw x scale</option><option value="2">Gearbox type's table</option></select></div>
+                    <div class="form-group narrow"><label>Scale</label><input type="number" id="selector.scale" step="any"></div>
+                </div>
+                <div class="help">The temperature is read every 10th pass. Lock-up comes out as 0 open, 1 slipping, 2 locked; the selector as the gauge's 1 P, 2 R, 3 N, 4 D, 5 S, 6 M. "Gearbox type's table" turns the gearbox's own codes into those (BMW DA22 / DA2E). The raw numbers show under Lock-up above, for working out another gearbox's codes.</div>
+
+                </div>
+                <div id="dsgTpBox">
+                <div class="spec-title">TP2.0 (PQ35)</div>
+                <div class="row-inline">
+                    <div class="form-group narrow"><label>Module (hex)</label><input type="text" id="dsg.tp20Module" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Speed block</label><input type="number" id="dsg.tp20Group" min="0" max="255"></div>
+                    <div class="form-group narrow"><label>Speed field</label><select id="dsg.tp20SpeedField"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option><option value="255">none</option></select></div>
+                    <div class="form-group narrow"><label>Speed = (a*256+b) / </label><input type="number" id="dsg.tp20SpeedDiv" step="any" min="0"></div>
+                    <div class="form-group narrow"><label>Gear block (0 off)</label><input type="number" id="dsg.tp20GearGroup" min="0" max="255"></div>
+                    <div class="form-group narrow"><label>Gear field</label><select id="dsg.tp20GearField"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
+                </div>
+                <div class="help">Defaults from a Mk5 DQ250 (02E300050H): block 1, field 4 (divisor 0 = use the formula byte). Check the live fields above for another gearbox.</div>
+                </div>
+                <div class="row-inline">
+                    <button class="btn-secondary" data-action="dsgRestart">Restart Session</button>
+                </div>
+            </section>
+        </div>
+
+        <!-- ================= DIAGNOSTICS: MEASURING VALUES FROM ANY MODULE (VAG diag, 0.13.0; tab renamed 0.36.7) ================= -->
+        <div class="page" id="vdiag-page">
+            <section class="card">
+                <h2>Diagnostics (live)</h2>
+                <label class="toggle" data-nosave><input type="checkbox" class="other-scanners" data-nosave><span class="toggle-slider"></span><span class="toggle-label">Enable Other Scanners</span></label>
+                <div class="help" id="vdState">--</div>
+                <div class="mono" id="vdIdent"></div>
+                <div class="mono" id="vdLive"></div>
+            </section>
+            <section class="card" id="vdModuleCard">
+                <h2>Module</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Requests</label><select id="vdiag.run"><option value="0">Off</option><option value="1">When used</option><option value="2">Always</option></select></div>
+                    <div class="form-group"><label>Connection</label><select id="vdiag.link"><option value="0">CAN wire</option><option value="1">OBD adapter</option></select></div>
+                    <div class="form-group"><label>Module</label><select id="vdModSel" data-nosave="1"></select></div>
+                    <div class="form-group narrow" id="vdAddrBox" style="display:none"><label>Address (hex)</label><input type="text" id="vdiag.addr" data-hex="1"></div>
+                    <div class="form-group"><label>Protocol</label><select id="vdiag.protocol"><option value="0">Auto (UDS, else TP2.0)</option><option value="1">UDS (MQB era)</option><option value="2">KWP2000 over TP2.0 (PQ era)</option></select></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Turbo</label><select id="vdiag.turbo"><option value="0">Off</option><option value="1">On</option></select></div>
+                    <div class="form-group narrow"><label>Group size (Turbo)</label><select id="vdiag.groupSize"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></div>
+                    <div class="form-group narrow"><label>Gap (ms, Turbo off)</label><input type="number" id="vdiag.pollMs" min="10" max="2000"></div>
+                    <div class="form-group"><label>UDS session</label><select id="vdiag.session"><option value="3">Extended 10 03</option><option value="1">Default 10 01</option></select></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group narrow"><label>UDS request id (hex, 0 = table)</label><input type="text" id="vdiag.txId" data-hex="1"></div>
+                    <div class="form-group narrow"><label>UDS answer id (hex, 0 = worked out)</label><input type="text" id="vdiag.rxId" data-hex="1"></div>
+                    <div class="form-group narrow"><label>TP2.0 module (hex, 0 = table)</label><input type="text" id="vdiag.tp20Module" data-hex="1"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group narrow"><label>Extended address out (hex, 0 = none)</label><input type="text" id="vdiag.txExt" data-hex="1"></div>
+                    <div class="form-group narrow"><label>Extended address back (hex, 0 = none)</label><input type="text" id="vdiag.rxExt" data-hex="1"></div>
+                </div>
+                <div class="help">Up to 32 measuring values, any make, each from its own module (Scan My Car and the DID Library set that; a value typed in here reads the module above): UDS on MQB-era modules, KWP2000 blocks on PQ-era. Only the values a gauge page or trigger uses are asked for (all of them while this tab is open). Requests When used: while a gauge page shows a diagnostics value or this tab is open; Always: whenever the ignition is on. Turbo asks back to back and groups UDS values. If no module answers 3 times (once when nothing else is heard on the CAN) the tab stops asking until Restart Session, a settings change or the next ignition on.</div>
+                <div class="help">The ids can be 11-bit (7E0) or 29-bit (17FC0076, 18DA01F1). Through the OBD adapter (Bluetooth / WiFi) the tab speaks UDS only, on CAN cars only and Turbo groups at most 3 values; the adapter carries on with its OBD values in between. Extended addressing is for BMW (EGS: out 18, back F1); leave it at 0 on everything else.</div>
+                <div class="row-inline"><button class="btn-secondary" data-action="vdiagRestart" style="flex:0 1 200px">Restart Session</button></div>
+            </section>
+            <section class="card" id="vdValuesCard">
+                <h2>Values</h2>
+                <div class="help">UDS: DID, the first bit in the DID's data (byte 2 = bit 16) and how many bits, value = raw x scale + offset. Byte Order Low first is for values sent least significant byte first. KWP: block and field. Put one on a gauge with Source = Diagnostics, or add one from the DID Library above.</div>
+                <div id="vdList"></div>
+            </section>
+            <section class="card">
+                <h2>Try a DID</h2>
+                <div class="row-inline" data-nosave="1">
+                    <div class="form-group narrow"><label>DID (hex)</label><input type="text" id="vdProbeId" value="F40C"></div>
+                    <button class="btn-secondary" id="vdProbeBtn" style="flex:0 1 140px">Read It</button>
+                </div>
+                <div class="mono" id="vdProbeOut"></div>
+                <div class="help">F187 part number, F189 software, F197 module name; F400 + an OBD PID (F40C rpm) on most modules.</div>
+            </section>
+        </div>
+
+        <!-- ================= SERVICE (fault codes / basic settings, 0.16.0: service.js) ================= -->
+        <div class="page" id="service-page">
+            <section class="card">
+                <h2>Fault codes</h2>
+                <div class="row-inline" data-nosave>
+                    <div class="form-group"><label>Connection</label><select id="svcVia"><option value="0">K-line (KWP1281 / KWP2000)</option><option value="1">CAN (UDS / TP2.0)</option><option value="2">OBD adapter (UDS)</option></select></div>
+                    <div class="form-group"><label>Module</label><select id="svcModule" data-box="svcAddr"></select></div>
+                    <div class="form-group narrow" style="display:none"><label>Address (hex)</label><input type="text" id="svcAddr" value="01"></div>
+                </div>
+                <div class="row-inline" data-nosave>
+                    <button class="btn" id="svcRead">Read Faults</button>
+                    <button class="btn-secondary" id="svcClear">Clear Faults</button>
+                </div>
+                <div class="help" id="svcState"></div>
+                <div class="mono" id="svcFaults" style="white-space: pre-wrap"></div> <!-- 0.38.0: long fault descriptions wrap -->
+                <div class="help">Ignition on. From the gauge's own K-line or CAN, or through the OBD adapter. K-line tries KWP1281 (Mk4 era), then KWP2000; CAN tries UDS (MQB era), then TP2.0 (PQ era); the adapter speaks UDS (MQB era). Fault numbers as the workshop tools show them.</div>
+            </section>
+            <section class="card">
+                <h2>Scan Modules</h2>
+                <div class="row-inline" data-nosave>
+                    <div class="form-group"><label>Connection</label><select id="svcScanVia"><option value="1">CAN</option><option value="2">OBD adapter</option></select></div>
+                    <button class="btn" id="svcScan">Scan Modules</button>
+                </div>
+                <div class="help" id="svcScanState"></div>
+                <div id="svcModules"></div>
+                <div class="help">Asks every module the gauge knows the UDS ids of (and the 29-bit engine / gearbox ids) for its part number, name and how many faults it has stored, Only reads. MQB-era modules only: PQ-era ones speak TP2.0. Tap a module to read its faults.</div>
+            </section>
+            <section class="card">
+                <h2>Throttle body adaptation</h2>
+                <div class="row-inline" data-nosave>
+                    <div class="form-group"><label>Throttle</label><select id="svcTbPreset"><option value="60">Drive-by-wire, ME7 and later (group 060)</option><option value="98">Cable throttle (group 098)</option><option value="custom">Other basic setting group</option></select></div>
+                    <div class="form-group narrow" id="svcTbGroupBox"><label>Group</label><input type="number" id="svcTbGroup" min="1" max="255" value="60"></div>
+                    <div class="form-group"><label>Module</label><select id="svcTbModule" data-box="svcTbAddr"></select></div>
+                    <div class="form-group narrow" style="display:none"><label>Address (hex)</label><input type="text" id="svcTbAddr" value="01"></div>
+                </div>
+                <div class="row-inline" data-nosave>
+                    <button class="btn" id="svcTbStart">Start Adaptation</button>
+                    <button class="btn-secondary" id="svcTbStop" disabled>Stop</button>
+                </div>
+                <div class="help" id="svcTbState"></div>
+                <div class="help" id="svcTbInfo"></div>
+                <div class="gauge-grid" id="svcTbFields"></div>
+                <div class="help">Runs the group in basic setting mode over the K-line (KWP1281 modules): the ECU learns the throttle's end stops itself. Do it after cleaning or swapping the throttle body. Field 4 is the result (ADP. OK when it worked); its raw bytes show next to it.</div>
+                <div class="help" style="color:var(--accent-2)">Ignition on, engine off, foot off the pedal. It stops by itself after 60 s, if the engine starts or if this page closes. Turn the key off for 10 s afterwards.</div>
+            </section>
+        </div>
+
+        <!-- ================= BLUETOOTH OBD ================= -->
+        <div class="page" id="ble-page">
+            <section class="card">
+                <h2>OBD adapter (ELM327 - Bluetooth or WiFi)</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Connection</label><select id="elm.transport"><option value="0">Bluetooth LE</option><option value="1">WiFi (the adapter's own network)</option></select></div>
+                    <div class="form-group"><label>Auto-connect adapter</label><select id="elm.enabled"><option value="1">On - at power-up, and reconnect if it drops</option><option value="0">Off - only while the OBD screen shows, or a gauge page uses an OBD value</option></select></div>
+                    <div class="form-group"><label>Poll standard OBD PIDs</label><select id="elm.pollObd"><option value="1">Yes (rpm, boost, temps ...)</option><option value="0">No (DSG / terminal only)</option></select></div>
+                    <div class="form-group"><label>Fast OBD</label><select id="elm.fastObd"><option value="0">Off - standard adapter timing</option><option value="1">On - quicker answers, standard timing if they go missing</option></select></div>
+                </div>
+                <div class="state-line">Saved adapter: <b id="elmMac">--</b></div>
+                <div id="elmWifiBox">
+                <div class="row-inline">
+                    <div class="form-group"><label>Adapter network (SSID)</label><input type="text" id="elm.wifiSsid" data-nosave maxlength="32" placeholder="empty = first OBD-looking network"></div>
+                    <div class="form-group"><label>Network password</label><input type="password" id="elm.wifiPass" data-nosave autocomplete="off" maxlength="63"></div>
+                    <div class="form-group narrow"><label>Adapter IP</label><input type="text" id="elm.wifiHost" data-nosave maxlength="15"></div>
+                    <div class="form-group narrow"><label>Port</label><input type="number" id="elm.wifiPort" data-nosave min="1" max="65535"></div>
+                </div>
+                <div class="row-inline"><button class="btn-secondary" id="elmWifiScan">Find WiFi Adapters</button></div>
+                <div id="elmWifiFound"></div>
+                <div class="help">Usually 192.168.0.10 port 35000. Joining moves the gauge's WiFi to the adapter's channel: your phone drops for a few seconds and reconnects.</div>
+                </div>
+                <div class="row-inline">
+                    <button class="btn-secondary" id="elmScan">Scan Bluetooth (5 s)</button>
+                    <button class="btn-secondary" id="elmForget">Forget Adapter</button>
+                    <button class="btn-secondary" id="elmReid">Re-identify Vehicle</button>
+                </div>
+                <div id="elmFound"></div>
+                <div class="row-inline">
+                    <!-- 0.37.7: the K-line choice (1) is set on the K-line tab now; it shows here as what the adapter does -->
+                    <div class="form-group"><label>Adapter Source</label><select id="elm.extraSource"><option value="0">OBD PIDs / DSG as set</option><option value="1" hidden>VAG K-line blocks (set on the K-line tab)</option><option value="2">CAN broadcast into the gauges (DBC / profile)</option></select></div>
+                </div>
+                <div class="help">CAN broadcast monitors the car's frames through the adapter and decodes them with the CAN tab's profile or DBC, for cars that broadcast on CAN but answer no OBD-on-CAN. K-line blocks through the adapter are set on the K-line tab.</div>
+                <div class="help">Bluetooth LE ("iPhone compatible") adapters only, e.g. OBDLink CX, Veepeak BLE, vLinker MC+, Vgate iCar Pro BLE.</div>
+            </section>
+            <section class="card">
+                <h2>Adapter &amp; vehicle</h2>
+                <div class="gauge-grid">
+                    <div class="gauge"><div class="gauge-label">State</div><div class="gauge-value" id="elmState" style="font-size:16px">--</div></div>
+                    <div class="gauge"><div class="gauge-label">Requests</div><div class="gauge-value" id="elmRate">--</div><div class="gauge-unit">/s</div></div>
+                    <div class="gauge"><div class="gauge-label">Battery</div><div class="gauge-value" id="elmVolts">--</div><div class="gauge-unit">V (ATRV)</div></div>
+                </div>
+                <div class="help" id="elmRestartRow" hidden>Bluetooth was switched on after the gauge started, and the
+                    memory it needs is already in use. It starts first after a restart. <button class="btn-secondary"
+                    id="elmRestart">Restart Now</button></div>
+                <div class="help" id="elmVehicle"></div>
+                <div class="help" id="elmAdapter"></div>
+                <div class="help" id="elmPids"></div>
+            </section>
+            <section class="card">
+                <h2>Live OBD data</h2>
+                <div class="gauge-grid" id="elmLive"></div>
+                <div class="help">Every standard OBD value the car answers. Any of them can go on a gauge (Source = OBD).</div>
+            </section>
+            <section class="card adv-card">
+                <h2>Terminal</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>AT / OBD command</label><input type="text" id="elmCmd" data-nosave maxlength="38" placeholder="ATRV, 010C, 22F190 ..."></div>
+                    <button class="btn" id="elmSend" style="flex:0 1 120px">Send</button>
+                </div>
+                <div class="mono" id="elmTerm">--</div>
+            </section>
+            <section class="card">
+                <h2>Fault codes &amp; bench tests</h2>
+                <div class="row-inline">
+                    <div class="form-group narrow"><label>Module (hex)</label><input type="text" id="elmTestModule" data-nosave value="01"></div>
+                    <div class="form-group narrow"><label>Block</label><input type="number" id="elmTestGroup" data-nosave min="1" max="255" value="1"></div>
+                </div>
+                <div class="spec-title">Fault codes (DTCs)</div>
+                <div class="row-inline">
+                    <button class="btn" data-elmtest="dtc">Read DTCs</button>
+                    <button class="btn-secondary" data-elmtest="clear">Clear DTCs</button>
+                </div>
+                <div class="spec-title">Bench tests</div>
+                <div class="row-inline">
+                    <button class="btn" data-elmtest="all">Run All</button>
+                    <button class="btn-secondary" data-elmtest="probe">Probe Adapter</button>
+                    <button class="btn-secondary" data-elmtest="raw">Raw CAN</button>
+                    <button class="btn-secondary" data-elmtest="tp20">TP2.0</button>
+                    <button class="btn-secondary" data-elmtest="kline">K-line</button>
+                </div>
+                <div class="help" id="elmTestState">No test run since boot.</div>
+                <div class="help">Ignition on, engine off. DTCs: the engine and gearbox (OBD / UDS) plus the module above (TP2.0). Every test writes a log to /logs. Only Clear DTCs changes anything.</div>
+            </section>
+        </div>
+
+        <!-- ================= GAUGE CHAIN ================= -->
+        <div class="page" id="chain-page">
+            <section class="card">
+                <h2>Daisy Chain</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Chain</label><select id="chain.enabled"><option value="0">Off (standalone)</option><option value="1">On</option></select></div>
+                    <div class="form-group narrow"><label>Node id</label><select id="chain.nodeId"><option value="255">Auto</option></select></div>
+                    <div class="form-group"><label>Name</label><input type="text" id="chain.nodeName" maxlength="15"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group narrow"><label>Group (hex)</label><input type="text" id="chain.group" data-hex="1"></div>
+                    <div class="form-group"><label>Transport</label><select id="chain.transport"><option value="0">Auto</option><option value="1">CAN</option><option value="2">ESP-NOW</option><option value="3">CAN + ESP-NOW</option><option value="4">Off</option></select></div>
+                    <div class="form-group"><label>Link frames on CAN</label><select id="chain.canTx"><option value="0">Not allowed (ESP-NOW only)</option><option value="1">Allowed</option></select></div>
+                    <div class="form-group narrow"><label>CAN base id (hex)</label><input type="text" id="chain.canBaseId" data-hex="1"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Follow master page</label><select id="chain.followPage"><option value="0">No</option><option value="1">Yes</option></select></div>
+                    <div class="form-group"><label>Follow master night mode</label><select id="chain.followNight"><option value="1">Yes</option><option value="0">No</option></select></div>
+                    <div class="form-group"><label>Failover</label><select id="chain.failover"><option value="1">An Auto follower takes over</option><option value="0">Off</option></select></div>
+                </div>
+                <div class="help">One master does the asking (OBD, gearbox, adapter, OpenHaldex modes) and every gauge shares its values. Every gauge needs the same group. Each gauge's role and number are set below, from any gauge.</div>
+            </section>
+            <section class="card">
+                <h2>Gauge Numbers</h2>
+                <div class="row-inline">
+                    <button class="btn" data-action="chainShowNumbers" style="flex:0 1 180px">Show Numbers</button>
+                    <button class="btn-secondary" data-action="chainHideNumbers" style="flex:0 1 160px">Hide Numbers</button>
+                </div>
+                <div id="chainTable" class="chain-table">--</div>
+                <div class="help">Every gauge on the link, this one included. The number is the gauge's place in the row, counted from the left as you sit in the car (1 = leftmost). Show Numbers puts each gauge's number big on its own glass for 15 s, and a gauge whose number or role is changed here shows its new one for a few seconds, so you can see which is which. Only one gauge can be set to Master; Auto lets the gauges choose.</div>
+            </section>
+            <section class="card">
+                <h2>Row wave</h2>
+                <div class="state-line">This gauge: <b id="rowStatus">--</b></div>
+                <div class="row-inline">
+                    <button class="btn-secondary" data-action="shutdownShow" style="flex:0 1 160px">Play It Now</button>
+                </div>
+                <div class="help">At ignition off the gauges in a row wave to each other, then to you. Each gauge needs a number (above), an ignition source, the same off delay and a shutdown sprite with row clips (Rev). Play It Now plays it on every numbered gauge that has a shutdown sprite.</div>
+            </section>
+            <section class="card">
+                <h2>Gauges on the link</h2>
+                <div class="help" id="chainMe"></div>
+                <div class="mono" id="chainNodes">--</div>
+            </section>
+            <section class="card">
+                <h2>Update Other Gauges</h2>
+                <div class="state-line">This gauge: <b id="chainUpdState">--</b></div>
+                <div class="mono" id="chainUpdList">--</div>
+                <div class="row-inline">
+                    <button class="btn" data-action="chainUpdate" style="flex:0 1 220px">Update Other Gauges</button>
+                    <button class="btn-secondary" data-action="chainUpdateStop" style="flex:0 1 120px">Stop</button>
+                </div>
+                <div class="help">Sends this gauge's firmware and web pages to the other gauges in the chain over ESP-NOW, one gauge at a time (about a minute each). Only files that differ are sent, and each gauge keeps its own files (.ecu, logs). Car parked, the same group on every gauge, and each gauge on 0.25.0 or later (an older one needs one update from its own web page first).</div>
+            </section>
+        </div>
+
+        <!-- ================= SETTINGS ================= -->
+        <div class="page" id="settings-page">
+            <!-- 0.23.0: the cards are in sections (each card's data-sec), one section showing at a time - app.js settingsSections() -->
+            <nav class="sec-chips" id="settingsChips">
+                <button class="sec-chip" data-sec="display">Display</button>
+                <button class="sec-chip" data-sec="logo">Logo &amp; Sprites</button>
+                <button class="sec-chip" data-sec="power">Power &amp; Wiring</button>
+                <button class="sec-chip" data-sec="wifi">WiFi</button>
+                <button class="sec-chip" data-sec="device">Device</button>
+            </nav>
+            <section class="card" data-sec="device">
+                <h2>Menu and Tabs</h2>
+                <div class="help">What this car has: each switch shows or hides the gauge menu entry, its tab and its Dashboard tile. First Boot sets these for you.</div>
+                <div class="menu-toggles" id="menuToggles"></div>
+            </section>
+            <section class="card" data-sec="display">
+                <h2>Display</h2>
+                <div class="help">Night brightness is used while the illumination input is on. Make colours approximate each make's night lighting. "Match car" picks one from the VIN (OBD adapter).</div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Brightness (<span id="brightVal">--</span>%)</label><input type="range" id="display.brightness" min="5" max="100"></div>
+                    <div class="form-group"><label>Night brightness (<span id="nightVal">--</span>%)</label><input type="range" id="display.nightBrightness" min="5" max="100"></div>
+                </div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Theme</label><select id="display.theme"></select></div>
+                    <div class="form-group narrow"><label>Units</label><select id="units.quick"><option value="0">Metric</option><option value="1">Imperial</option><option value="2">Custom</option></select></div>
+                </div>
+                <div class="row-inline" id="unitRows">
+                    <div class="form-group narrow"><label>Speed</label><select id="units.speed"><option value="0">km/h</option><option value="1">mph</option></select></div>
+                    <div class="form-group narrow"><label>Boost</label><select id="units.boost"><option value="0">bar</option><option value="1">psi</option><option value="2">kPa</option></select></div>
+                    <div class="form-group narrow"><label>Pressures</label><select id="units.pressure"><option value="0">bar</option><option value="1">psi</option><option value="2">kPa</option></select></div>
+                    <div class="form-group narrow"><label>Temperature</label><select id="units.temp"><option value="0">&deg;C</option><option value="1">&deg;F</option></select></div>
+                    <div class="form-group narrow"><label>Mixture</label><select id="units.mixture"><option value="0">lambda</option><option value="1">AFR</option></select></div>
+                    <div class="form-group narrow"><label>Distance</label><select id="units.distance"><option value="0">km</option><option value="1">miles</option></select></div>
+                </div>
+                <div class="help" id="unitRowsHelp">Imperial is mph, psi, &deg;F and miles (lambda stays lambda). Custom picks each one. The dials follow the units: a gauge's Min, Max and Redline are turned over to the new unit and rounded (280 km/h becomes 175 mph). Logs and triggers keep the gauge's own units (km/h, bar, &deg;C).</div>
+                <div class="theme-box">
+                    <canvas id="themePreview" width="150" height="150"></canvas>
+                    <div class="theme-side">
+                        <div id="themeInfo"></div>
+                        <div class="row-inline" id="themeCustom">
+                            <div class="form-group narrow"><label>Dial colour</label><input type="color" id="display.themeDial"></div>
+                            <div class="form-group narrow"><label>Needle colour</label><input type="color" id="display.themeNeedle"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="adv">
+                    <div class="row-inline">
+                        <div class="form-group"><label>Gauge feel</label><select id="display.gaugeFeel"><option value="0">Analog</option><option value="1">Digital</option></select></div>
+                    </div>
+                    <div class="help" style="margin:-6px 0 14px"><b>Analog</b>: needles glide like a real pointer. <b>Digital</b>: every reading shows the moment it arrives.</div>
+                    <div class="row-inline">
+                        <div class="form-group"><label>Swipe animation (ms)</label><input type="number" id="display.swipeAnimMs" min="0" max="1000"></div>
+                        <div class="form-group"><label>Boot fade (ms)</label><input type="number" id="boot.fadeMs" min="100" max="5000"></div>
+                        <div class="form-group"><label>Long press (ms)</label><input type="number" id="display.longPressMs" min="200" max="5000"></div>
+                    </div>
+                </div>
+            </section>
+            <section class="card" id="rotateCard" data-sec="display" style="display:none"> <!-- 0.25.1: screen rotation (shown when the firmware has it) -->
+                <h2>Screen Rotation</h2>
+                <div class="help">Turns the whole picture round the middle of the glass: Upside Down for a gauge fitted the other way up, Rotation Trim to straighten one that sits slightly crooked in its pod (+ turns it clockwise). Touch follows the picture. While either is set, each frame costs a little more to draw.</div>
+                <div class="row-inline">
+                    <label class="toggle" style="flex:0 1 200px"><input type="checkbox" id="rotUpsideDown"><span class="toggle-slider"></span><span class="toggle-label">Upside Down</span></label>
+                    <div class="form-group"><label>Rotation trim (<span id="rotTrimVal">0</span>&deg;)</label><input type="range" id="rotTrim" min="-15" max="15" step="0.5"></div>
+                    <button class="btn-secondary" id="rotTrimZero" style="flex:0 1 140px">Reset Trim</button>
+                </div>
+                <div class="help" id="rotState"></div>
+            </section>
+            <section class="card" id="bootLogoCard" data-sec="logo"> <!-- 0.23.0: was part of the Display card -->
+                <h2>Boot logo</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Boot logo</label><select id="boot.logo"><option value="0">None</option><option value="6">can2gauge (default)</option><option value="1">Forbes Automotive</option><option value="2">OpenHaldex</option><option value="3">Custom text</option><option value="5">Manufacturer logo</option><option value="7">My Car</option><option value="4">Your own image (/logo.bin)</option></select></div>
+                    <div class="form-group" id="logoMakeBox"><label>Logo make</label><select id="boot.make"></select></div>
+                    <div class="form-group" id="bootTextBox"><label>Custom boot text</label><input type="text" id="boot.text" maxlength="23"></div>
+                    <button class="btn-secondary" data-action="bootShow" style="flex:0 1 160px">Show It Now</button>
+                </div>
+                <div class="help" id="logoList"></div>
+            </section>
+            <section class="card" id="ownLogoCard" data-sec="logo">
+                <h2>Your own boot logo</h2>
+                <div class="row-inline">
+                    <div class="form-group wide"><label>Image</label><button class="btn" id="logoPick" type="button">Choose an Image (SVG, PNG, JPG)</button><input type="file" id="logoUpFile" accept="image/*,.svg" hidden></div>
+                    <div class="form-group narrow"><label>Size (%)</label><input type="number" id="logoUpScale" min="40" max="100" value="80"></div>
+                </div>
+                <div class="theme-box">
+                    <canvas id="logoPreview" width="240" height="240"></canvas>
+                    <div class="theme-side">
+                        <div class="help" id="logoInfo">Pick an image to preview it on the round glass. It is drawn on black, so a transparent background works best.</div>
+                        <div class="row-inline"><button class="btn" id="logoUpBtn">Convert &amp; Upload</button></div>
+                        <div class="help" id="ownLogoState"></div>
+                    </div>
+                </div>
+            </section>
+            <section class="card" id="spritesCard" data-sec="logo">
+                <h2>Sprites</h2>
+                <div class="help">Turn Sprite on for a gauge (Gauges tab, More Options) and it animates with the reading. The screensaver comes up once the car is still. <b>Double-tap it</b> for Rev Runner.</div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Screensaver</label><select id="saver.enabled"><option value="0">Off</option><option value="1">On</option></select></div>
+                    <div class="form-group narrow"><label>After (s)</label><input type="number" id="saver.delayS" min="5" max="3600"></div>
+                </div>
+                <div class="adv">
+                    <div class="row-inline">
+                        <div class="form-group"><label>Screensaver sprite</label><select id="saver.sprite"></select></div>
+                        <div class="form-group wide"><label>React to the car</label><select id="saver.react"><option value="1">On - moods from the car's readings</option><option value="0">Off - its loop only</option></select></div>
+                        <button class="btn-secondary" data-action="saverShow" style="flex:0 1 160px">Show It Now</button>
+                    </div>
+                    <div class="state-line">Rev Runner High Score: <b class="sig-live" id="runnerBest">--</b></div>
+                    <div class="row-inline">
+                        <button class="btn-secondary" id="runnerReset" style="flex:0 1 160px">Reset High Score</button>
+                    </div>
+                    <div class="adv-head">Sprite packs on the gauge</div>
+                    <div id="spriteList"></div>
+                    <div class="row-inline" style="margin-top:14px">
+                        <div class="form-group full"><label>Upload a pack (.c2gs, name up to 15 characters)</label><input type="file" id="spriteFile" accept=".c2gs"></div>
+                        <button class="btn" id="spriteUpBtn" style="flex:0 1 160px">Upload</button>
+                    </div>
+                </div>
+            </section>
+            <section class="card" data-sec="power">
+                <h2>Output</h2>
+                <div class="row-inline">
+                    <div class="form-group"><label>Wiring</label><select id="io.outputMode"><option value="0">High-side: OUT switches +12 V, load to GND</option><option value="1">Low-side: OUT switches to GND, load to +12 V</option></select></div>
+                </div>
+                <div id="outList"></div>
+                <div class="help" id="outNote"></div>
+                <div class="help">Protected 3 A output. Auto = driven by the triggers.</div>
+            </section>
+            <section class="card" data-sec="power">
+                <h2>Illumination</h2>
+                <div class="help">Wire 58d (dash lights) or 58 (side lights) here; while on, the night brightness is used.</div>
+                <div class="state-line"><span class="dot-on" id="lightsDot"></span>Illumination: <b id="lightsStatus">--</b></div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Dim the screen</label><select id="io.nightSource"><option value="1">When the illumination is on</option><option value="0">Never</option></select></div>
+                </div>
+                <div class="help" id="lightsIgnNote" style="display:none">The illumination input is set as the ignition (below), so it no longer dims the screen.</div>
+                <div class="adv">
+                    <div class="row-inline">
+                        <div class="form-group"><label>Input</label><select id="io.dimInvert"><option value="0">High (12 V / 58d PWM) = on</option><option value="1">Low = on</option></select></div>
+                    </div>
+                </div>
+            </section>
+            <section class="card" id="ignCard" data-sec="power">
+                <h2>Ignition (permanent power)</h2>
+                <div class="help">For a gauge on permanent 12 V: at ignition off it plays the shutdown sprite and goes quiet, then deep-sleeps after the delay. Custom bit = byte x 8 + bit. In a chain only one gauge needs the CAN or wire ignition: set it on that gauge's own page and every other gauge switches to Another gauge and sleeps and wakes with it. The last gauge given an ignition wins (deep sleep needs the chain on CAN; on WiFi only they stay dark in standby). Off Delay, Deep Sleep After and the shutdown sprite are the same on every gauge in the chain.</div>
+                <div class="state-line"><span class="dot-on" id="ignDot"></span>Ignition: <b id="ignStatus">--</b><span id="pwrPart"><span class="sep">&middot;</span>Gauge: <b id="pwrStatus">--</b></span></div>
+                <div class="row-inline">
+                    <div class="form-group"><label>Ignition from</label><select id="power.ignSource"><option value="0">Off - the gauge is on switched power</option><option value="1">CAN (terminal 15)</option><option value="2">Illumination input (wired to ignition)</option><option value="3">Another gauge in the chain (set by itself)</option></select></div>
+                </div>
+                <div class="help" id="ignDetail"></div>
+                <div class="adv">
+                    <div class="row-inline" id="ignCanBox">
+                        <div class="form-group"><label>Terminal 15 from</label><select id="power.canMode"><option value="0">VAG PQ - BSG_Last 0x570 / ZAS_1 0x572</option><option value="1">VAG MQB - Klemmen_Status_01 0x3C0</option><option value="2">Custom bit</option><option value="3">Any bus traffic (no terminal 15 frame, e.g. Mk4)</option></select></div>
+                        <div class="form-group narrow ign-custom"><label>Frame id (hex)</label><input type="text" id="ignCanId"></div>
+                        <div class="form-group narrow ign-custom"><label>Bit (0-63)</label><input type="number" id="power.canBit" min="0" max="63"></div>
+                        <div class="form-group narrow ign-custom"><label>Bit set means</label><select id="power.canInvert"><option value="0">Ignition on</option><option value="1">Ignition off</option></select></div>
+                    </div>
+                    <div class="row-inline">
+                        <div class="form-group narrow"><label>Off delay (s)</label><input type="number" id="power.offDelayS" min="0" max="60"></div>
+                        <div class="form-group narrow"><label>Deep sleep after (min)</label><input type="number" id="power.standbyMin" min="0" max="240"></div>
+                        <div class="form-group"><label>Shutdown sprite</label><select id="power.shutdownSprite"></select></div>
+                        <button class="btn-secondary" data-action="shutdownShow" style="flex:0 1 160px">Play It Now</button>
+                    </div>
+                </div>
+            </section>
+            <section class="card" data-sec="wifi">
+                <h2>WiFi</h2>
+                <div class="help">Applies when you leave the field (reconnect to the new name). Blank password = open; otherwise 8+ characters. Home WiFi is on the <a href="#otaWifiStaCard" data-goto="ota">OTA tab</a>.</div>
+                <div class="row-inline">
+                    <div class="form-group"><label>AP name</label><input type="text" id="wifi.apSsid" maxlength="31"></div>
+                    <div class="form-group"><label>AP password</label><input type="text" id="wifi.apPassword" maxlength="31" placeholder="none (open)"></div>
+                </div>
+                <div class="help" id="wifiInfo"></div>
+                <div class="adv">
+                    <div class="row-inline">
+                        <div class="form-group"><label>Hostname (.local)</label><input type="text" id="wifi.hostname" maxlength="15"></div>
+                    </div>
+                </div>
+            </section>
+            <section class="card" data-sec="device">
+                <h2>Device</h2>
+                <div class="help">Import Backup restores a Download Backup file (all settings) and reboots.</div>
+                <label class="toggle" style="margin-bottom:6px"><input type="checkbox" id="showAdvanced" data-nosave><span class="toggle-slider"></span><span class="toggle-label">Advanced</span></label>
+                <!-- 0.37.0: Enable Other Scanners (the same switch is on the Diagnostics tab) -->
+                <label class="toggle" style="margin-bottom:6px"><input type="checkbox" class="other-scanners" data-nosave><span class="toggle-slider"></span><span class="toggle-label">Enable Other Scanners</span></label>
+                <div class="help">Stops everything this gauge asks the car (diagnostics values, K-line, gearbox reads, OBD on the CAN, scans) so another scan tool or code reader can connect. Gauges that need those values show no data meanwhile. Off again after a restart.</div>
+                <div class="row-inline" style="margin-top:12px">
+                    <button class="btn-secondary" data-action="reboot">Reboot</button>
+                    <button class="btn-secondary" id="backupBtn">Download Backup</button>
+                </div>
+                <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+                <div class="help" id="deviceInfo"></div>
+                <div class="adv">
+                    <div class="row-inline">
+                        <button class="btn-secondary" id="importBtn">Import Backup</button>
+                        <button class="btn-secondary" id="factoryBtn">Factory Reset</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ================= DIAG ================= -->
+        <div class="page" id="diag-page">
+            <section class="card">
+                <h2>Gauge</h2>
+                <div class="diag-grid" id="diagGauge"></div>
+            </section>
+            <section class="card">
+                <h2>Communication</h2>
+                <div class="diag-grid" id="diagComms"></div>
+            </section>
+            <section class="card">
+                <h2>Power &amp; inputs</h2>
+                <div class="diag-grid" id="diagPower"></div>
+            </section>
+            <section class="card">
+                <h2>Display &amp; touch</h2>
+                <div class="diag-grid" id="diagDisplay"></div>
+                <div class="row-inline" style="margin-top:10px">
+                    <button class="btn-secondary" data-action="touchRedetect" style="flex:0 1 220px">Look for Touch Again</button>
+                </div>
+                <div class="help">Tap the glass: Presses should go up. Frames ~57 /s with a blank screen = check the flex cable.</div>
+            </section>
+            <section class="card">
+                <h2>Drawing</h2>
+                <div class="diag-grid" id="diagPerf"></div>
+                <div class="row-inline" style="margin-top:10px" id="drawCard">
+                    <div class="form-group"><label>Drawing (applies after a reboot)</label><select id="display.renderMode"><option value="0">Partial - strips copied to the glass (only when there is room for it)</option><option value="1">Direct - tear-free, swapped on vsync</option></select></div>
+                    <div class="form-group"><label>Fills and image copies</label><select id="display.simdBlend"><option value="0">C (LVGL's own)</option><option value="1">ESP32-S3 SIMD (Espressif's assembly)</option></select></div>
+                    <button class="btn-secondary" data-action="reboot" style="flex:0 1 140px">Reboot</button>
+                </div>
+                <div class="row-inline" style="margin-top:10px">
+                    <button class="btn-secondary" data-action="benchmark" style="flex:0 1 200px">Run Benchmark</button>
+                    <div class="help" id="benchResult" style="flex:1 1 300px;align-self:center">Not run yet.</div>
+                </div>
+                <div class="help">Only changes are redrawn, so a still gauge reads near 0 fps. The benchmark redraws the whole glass for 6 s: the figure to compare between versions.</div>
+            </section>
+        </div>
+
+        <!-- ================= OTA ================= -->
+        <div class="page" id="ota-page">
+            <!-- shared OTA tab (_SharedTheme/ota_tab.html v2), driven by ota.js -->
+            <article class="card">
+              <h2>Device</h2>
+              <div class="ota-info">
+                <div><span>Firmware</span><strong id="otaFwVersion">--</strong></div>
+                <div><span>Web UI</span><strong id="otaFsVersion">--</strong></div>
+                <div><span>Board</span><strong id="otaBoard">--</strong></div>
+                <div><span>Updates</span><strong id="otaSafe">--</strong></div>
+              </div>
+              <p class="hint" id="otaSafeHint"></p>
+            </article>
+
+            <article class="card">
+              <h2>Update from GitHub</h2>
+              <div class="ota-info">
+                <div><span>Installed</span><strong id="updInstalled">--</strong></div>
+                <div><span>Latest</span><strong id="updLatest">--</strong></div>
+                <div><span>Status</span><strong id="updState">Not checked</strong></div>
+              </div>
+              <p class="hint">This browser needs internet while it can still reach the controller: join the controller to your
+                router in <a href="#otaWifiStaCard" id="updGoBridge">Home WiFi</a> below, put this phone on the same network and
+                open the address that card shows. On the controller's own access point alone most phones drop mobile data.
+                Keep this page open until the device has rebooted. Release channel: <code id="updRepo">--</code></p>
+              <div class="ota-row">
+                <button id="updCheckBtn" class="btn primary">Check for Updates</button>
+                <button id="updBridgeBtn" class="btn" hidden>Set Up Home WiFi</button>
+                <label class="upd-beta"><input type="checkbox" id="updShowAll"> Show beta / older versions</label>
+              </div>
+              <div id="updStatus" class="status-line">Idle</div>
+              <div id="updPicker" hidden>
+                <label class="ota-field">Version
+                  <select id="updVersion"></select>
+                </label>
+                <div id="updNotes" class="upd-notes"></div>
+                <div class="ota-row">
+                  <button id="updInstallBtn" class="btn primary">Install Selected</button>
+                </div>
+              </div>
+              <div class="ota-steps" id="updSteps">
+                <div class="ota-step" data-step="dlfs"><span class="ota-step-num">1</span> Get UI</div>
+                <div class="ota-step" data-step="fs"><span class="ota-step-num">2</span> Flash UI</div>
+                <div class="ota-step" data-step="verify"><span class="ota-step-num">3</span> Verify</div>
+                <div class="ota-step" data-step="dlfw"><span class="ota-step-num">4</span> Get FW</div>
+                <div class="ota-step" data-step="fw"><span class="ota-step-num">5</span> Flash FW</div>
+                <div class="ota-step" data-step="reboot"><span class="ota-step-num">6</span> Reboot</div>
+              </div>
+              <div class="ota-progress" id="updProgressWrap" hidden>
+                <div class="ota-progress-bar" id="updProgressBar"></div>
+                <span class="ota-progress-label" id="updProgressLabel">0%</span>
+              </div>
+            </article>
+
+            <article class="card" id="otaWifiStaCard">
+              <h2>Home WiFi (Bridge Mode)</h2>
+              <p class="hint">Join the controller to your home or garage router; its own access point keeps running. Once it
+                shows <em>Connected</em>, put this phone on the same network, open the address shown and press
+                <strong>Check for updates</strong> again.</p>
+              <p class="status-line" id="otaWifiStaStatus">--</p>
+              <div class="ota-wifi-row">
+                <input type="text" id="otaWifiStaSsidInput" placeholder="Home network name" maxlength="32" autocomplete="off" spellcheck="false" list="otaWifiStaSsidList">
+                <datalist id="otaWifiStaSsidList"></datalist>
+                <button class="btn ota-icon" id="otaWifiStaScan" title="Scan for networks">&#128269;</button>
+              </div>
+              <div class="ota-wifi-row">
+                <input type="password" id="otaWifiStaPasswordInput" placeholder="Home network password (blank = open)" maxlength="64" autocomplete="new-password">
+                <button class="btn ota-icon" id="otaWifiStaPasswordToggle" title="Show / hide password">&#128065;</button>
+              </div>
+              <div class="ota-row">
+                <button class="btn" id="otaWifiStaSave">Save &amp; Apply</button>
+                <button class="btn" id="otaWifiStaReset">Disable</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <h2>Update from Files</h2>
+              <p class="hint">No internet needed here. Download <code>littlefs.bin</code> and <code>firmware.bin</code> from the
+                newest <code>V…</code> folder under <code>Releases/</code> on GitHub, then upload them here:
+                <strong>Filesystem</strong> (littlefs.bin, the web interface) first, then <strong>Firmware</strong>
+                (firmware.bin). The device reboots once the firmware upload completes.</p>
+              <div class="ota-steps" id="otaSteps">
+                <div class="ota-step" data-step="filesystem"><span class="ota-step-num">1</span> Filesystem</div>
+                <div class="ota-step" data-step="firmware"><span class="ota-step-num">2</span> Firmware</div>
+              </div>
+              <label class="ota-field">Update Type
+                <select id="otaType">
+                  <option value="filesystem">Filesystem (web UI)</option>
+                  <option value="firmware">Firmware (application)</option>
+                </select>
+              </label>
+              <label class="ota-field">Binary (.bin)
+                <input id="otaBin" type="file" accept=".bin,application/octet-stream">
+              </label>
+              <div class="ota-progress" id="otaProgressWrap" hidden>
+                <div class="ota-progress-bar" id="otaProgressBar"></div>
+                <span class="ota-progress-label" id="otaProgressLabel">0%</span>
+              </div>
+              <div class="ota-row">
+                <button id="otaUploadBtn" class="btn primary">Upload</button>
+              </div>
+              <div id="otaStatus" class="status-line">Idle</div>
+            </article>
+        </div>
+    </div>
+    <script src="app.js?v=%FW_VERSION%"></script>
+    <script src="firstboot.js?v=%FW_VERSION%"></script>
+    <script src="me7read.js?v=%FW_VERSION%"></script>
+    <script src="uPlot.iife.min.js?v=%FW_VERSION%"></script>
+    <script src="logview.js?v=%FW_VERSION%"></script>
+    <script src="logtab.js?v=%FW_VERSION%"></script>
+    <script src="service.js?v=%FW_VERSION%"></script>
+    <script src="vdid.js?v=%FW_VERSION%"></script>
+    <script src="carscan.js?v=%FW_VERSION%"></script> <!-- 0.37.0: Scan My Car + the Car source -->
+    <script src="car.js?v=%FW_VERSION%"></script>
+    <script src="ota.js?v=%FW_VERSION%"></script>
+</body>
+
+</html>

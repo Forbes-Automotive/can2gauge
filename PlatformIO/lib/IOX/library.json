@@ -1,0 +1,1 @@
+{ "name": "IOX", "version": "4.0.0", "description": "can2gauge V3.4: one DRV8876 half-bridge output (high- or low-side) + dash-light input + output fault on the TCA9554", "frameworks": "arduino", "platforms": "espressif32" }

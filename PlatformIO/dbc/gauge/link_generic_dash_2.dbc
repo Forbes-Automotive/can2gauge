@@ -1,0 +1,89 @@
+VERSION "c2g-draft-1"
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	BA_DEF_DEF_
+	SIG_VALTYPE_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: LINK_ECU
+
+BO_ 1000 LINK_GD2_X: 8 LINK_ECU
+ SG_ EngineSpeed : 7|16@0+ (1,0) [0|65535] "rpm" Vector__XXX
+ SG_ MGP : 23|16@0+ (1,-100) [-100|65435] "kPa" Vector__XXX
+ SG_ ECT : 39|8@0+ (1,-50) [-50|205] "C" Vector__XXX
+ SG_ IAT : 47|8@0+ (1,-50) [-50|205] "C" Vector__XXX
+ SG_ ECUVolts : 55|8@0+ (0.1,0) [0|25.5] "V" Vector__XXX
+ SG_ OilTemp : 63|8@0+ (1,-50) [-50|205] "C" Vector__XXX
+
+BO_ 1001 LINK_GD2_X1: 8 LINK_ECU
+ SG_ TPS : 7|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ IgnitionAngle : 23|16@0+ (0.1,-100) [-100|6453.5] "deg" Vector__XXX
+ SG_ NonDrivenWheelSpeed : 39|8@0+ (1,0) [0|255] "km/h" Vector__XXX
+ SG_ OilPressure : 47|8@0+ (10,0) [0|2550] "kPa" Vector__XXX
+ SG_ FuelPressure : 55|8@0+ (10,0) [0|2550] "kPa" Vector__XXX
+ SG_ ECUTemp : 63|8@0+ (1,-50) [-50|205] "C" Vector__XXX
+
+BO_ 1002 LINK_GD2_X2: 8 LINK_ECU
+ SG_ Lambda1 : 7|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Lambda2 : 23|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ SteeringPosition : 39|16@0+ (0.1,-3000) [-3000|3553.5] "deg" Vector__XXX
+ SG_ BaroPressure : 55|16@0+ (0.1,0) [0|6553.5] "kPa" Vector__XXX
+
+BO_ 1003 LINK_GD2_X3: 8 LINK_ECU
+ SG_ GearPosition : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ FuelCut : 15|8@0+ (1,0) [0|255] "%" Vector__XXX
+ SG_ IgnitionCut : 23|8@0+ (1,0) [0|255] "%" Vector__XXX
+ SG_ InjectorPWActual : 31|16@0+ (0.001,0) [0|65.535] "ms" Vector__XXX
+ SG_ FaultCodeCount : 47|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ KnockLevelGlobal : 55|16@0+ (5,0) [0|327675] "" Vector__XXX
+
+
+CM_ "DRAFT can2gauge DBC: Link 'Generic Dash 2' / Race Technology 'DASH2PRO' stream, IDs X..X+3 (X user set, 1000 default for Dash2Pro), Motorola byte order, fixed 20 Hz.";
+CM_ BO_ 1000 "Source: Link G4+ PCLink help, Generic Dash 2 and Race Technology Dash2Pro. Fixed 20 Hz. G4X/G5 assumed identical - UNVERIFIED.";
+CM_ SG_ 1000 MGP "Gauge pressure kPa (gauge 'boost' is bar: /100). No MAP in this stream: map = MGP + baro stays in code.";
+CM_ SG_ 1000 ECUVolts "One byte x 0.1 = 25.5 V max although the help says 0-30 V.";
+CM_ BO_ 1001 "Source: Link G4+ PCLink help, Generic Dash 2 and Race Technology Dash2Pro. Fixed 20 Hz. G4X/G5 assumed identical - UNVERIFIED.";
+CM_ SG_ 1001 NonDrivenWheelSpeed "One byte, 1 km/h (255 max although the help says 0-1000). Used as road speed.";
+CM_ SG_ 1001 OilPressure "x10 kPa (gauge is bar: /100).";
+CM_ SG_ 1001 FuelPressure "x10 kPa (gauge is bar: /100).";
+CM_ BO_ 1002 "Source: Link G4+ PCLink help, Generic Dash 2 and Race Technology Dash2Pro. Fixed 20 Hz. G4X/G5 assumed identical - UNVERIFIED.";
+CM_ SG_ 1002 BaroPressure "Fingerprint: raw ~950-1050 big-endian.";
+CM_ BO_ 1003 "Source: Link G4+ PCLink help, Generic Dash 2 and Race Technology Dash2Pro. Fixed 20 Hz. G4X/G5 assumed identical - UNVERIFIED.";
+CM_ SG_ 1003 GearPosition "Range 0-6; reverse encoding not documented - UNVERIFIED.";
+BA_DEF_ SG_ "GaugeKey" STRING ;
+BA_DEF_ SG_ "GaugePriority" INT 0 9;
+BA_DEF_ "GaugeRelocatable" INT 0 1;
+BA_DEF_ "GaugeBusSpeed" INT 0 1000000;
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_DEF_DEF_ "GaugeKey" "";
+BA_DEF_DEF_ "GaugePriority" 0;
+BA_DEF_DEF_ "GaugeRelocatable" 0;
+BA_DEF_DEF_ "GaugeBusSpeed" 500000;
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_ "GaugeBusSpeed" 1000000;
+BA_ "GaugeRelocatable" 1;
+BA_ "GenMsgCycleTime" BO_ 1000 50;
+BA_ "GenMsgCycleTime" BO_ 1001 50;
+BA_ "GenMsgCycleTime" BO_ 1002 50;
+BA_ "GenMsgCycleTime" BO_ 1003 50;
+BA_ "GaugeKey" SG_ 1000 EngineSpeed "rpm";
+BA_ "GaugeKey" SG_ 1000 MGP "boost";
+BA_ "GaugeKey" SG_ 1000 ECT "coolant";
+BA_ "GaugeKey" SG_ 1000 IAT "iat";
+BA_ "GaugeKey" SG_ 1000 ECUVolts "batt";
+BA_ "GaugeKey" SG_ 1000 OilTemp "oiltemp";
+BA_ "GaugeKey" SG_ 1001 TPS "throttle";
+BA_ "GaugeKey" SG_ 1001 IgnitionAngle "timing";
+BA_ "GaugeKey" SG_ 1001 NonDrivenWheelSpeed "speed";
+BA_ "GaugeKey" SG_ 1001 OilPressure "oilPressure";
+BA_ "GaugeKey" SG_ 1001 FuelPressure "fuelPressure";
+BA_ "GaugeKey" SG_ 1002 Lambda1 "lambda";
+BA_ "GaugeKey" SG_ 1003 GearPosition "gear";
+VAL_ 1003 GearPosition 0 "N" ;

@@ -1,0 +1,16 @@
+# can2gauge - 16 MB flash (ESP32-S3-WROOM-1-N16R8)
+# 0.10.0: OTA slots 4 MB -> 3 MB (the app is ~2.7 MB) so LittleFS (~9.9 MB) holds the Rev sprite pack (~5.5 MB) next to
+# the web UI, logos, DBCs and labels. A partition table can't change over the air: 0.10.0 goes on by USB (bootloader,
+# partitions, firmware and littlefs - tools/make_release.py packages all four), later versions update over the air again.
+# next (after 0.11.0): OTA slots 3 MB -> 3.25 MB (the app reached ~2.9 MB with the ECU channel lists), LittleFS 9.9 MB -> 9.4 MB
+# (data/ is ~8.3 MB, so ~0.8 MB stays free for uploads and logs). Done before the first release; a bench gauge on 0.10.0 or
+# 0.11.0 takes it by USB once, like 0.10.0.
+# 0.24.0: data/ had grown to ~9 MB (236 KB free, slow enough writes to trip the watchdog). The partitions stay as they are:
+# the image is packed instead (tools/fs_pack.py: zipped web files, logos, label index, sprite frames) to ~5 MB, ~47 % free.
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+ota_0,      app,  ota_0,    0x10000,  0x340000,
+ota_1,      app,  ota_1,    0x350000, 0x340000,
+spiffs,     data, spiffs,   0x690000, 0x960000,
+coredump,   data, coredump, 0xFF0000, 0x10000,

@@ -1,0 +1,1 @@
+{ "name": "CANLine", "version": "1.0.0", "description": "TWAI (classic CAN) transport + VAG PQ / OBD-II PID / OpenHaldex broadcast decoders for can2gauge", "frameworks": "arduino", "platforms": "espressif32" }

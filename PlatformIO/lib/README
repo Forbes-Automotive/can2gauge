@@ -1,0 +1,12 @@
+can2gauge private libraries (PlatformIO picks these up automatically):
+
+  Display_ST7701   2.1" 480x480 ST7701S RGB panel + AL8860 backlight. Init sequences: YouriTech ET021CR01-Z (vendor
+                   code, the default) and the Waveshare 2.1 glass (from the UGB firmware, MIT; [env:waveshare])
+  CST8xx_Touch     capacitive touch controller on the panel flex
+  TCA9554          I2C expander (LCD reset/CS, touch reset, CAN termination FET)
+  LVGL_Driver      LVGL 9 display/touch glue, LVGL task + lock
+  GaugeUI          the display front end (pages, swipe, menu, alerts, boot logo)
+  CANLine          TWAI transport + VAG PQ / OBD-II / OpenHaldex decoders
+  KLine            L9637D transport + KWP1281 + KWP2000 stacks
+  ME7Logger        ME7Logger-style RAM logging (.ecu/.cfg) over KWP2000
+  IOX              TCA9554 P4-P7 outputs + ADS1115 analog inputs

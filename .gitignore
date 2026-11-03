@@ -1,0 +1,9 @@
+.pio/
+.cache/
+.dummy/
+.vscode/
+managed_components/
+sdkconfig.can2gauge
+compile_commands.json
+__pycache__/
+*.pyc

@@ -1,0 +1,1 @@
+{ "name": "ME7Logger", "version": "1.0.0", "description": "ME7Logger-compatible fast RAM logging over K-line (.ecu / .cfg definition files) for can2gauge", "frameworks": "arduino", "platforms": "espressif32", "dependencies": [] }

@@ -1,0 +1,280 @@
+{
+ "v": 1,
+ "src": "OBDb (github.com/OBDb), CC BY-SA 4.0",
+ "libs": [
+  {
+   "key": "vag",
+   "name": "VW group (VW, Audi, Skoda, SEAT, Cupra, Porsche, Bentley, Lamborghini)",
+   "makes": [
+    "Audi",
+    "Bentley",
+    "Cupra",
+    "Lamborghini",
+    "Porsche",
+    "SEAT",
+    "Seat",
+    "Skoda",
+    "Volkswagen"
+   ],
+   "dids": 1977,
+   "values": 3555,
+   "confirmed": 3163,
+   "bytes": 246562
+  },
+  {
+   "key": "aiways",
+   "name": "Aiways",
+   "makes": [
+    "Aiways"
+   ],
+   "dids": 28,
+   "values": 29,
+   "confirmed": 29,
+   "bytes": 2028
+  },
+  {
+   "key": "bmw",
+   "name": "BMW group (BMW, MINI, Rolls-Royce)",
+   "makes": [
+    "BMW",
+    "MINI",
+    "Rolls"
+   ],
+   "dids": 133,
+   "values": 484,
+   "confirmed": 438,
+   "bytes": 28540
+  },
+  {
+   "key": "byd",
+   "name": "BYD",
+   "makes": [
+    "BYD"
+   ],
+   "dids": 169,
+   "values": 174,
+   "confirmed": 0,
+   "bytes": 12665
+  },
+  {
+   "key": "ford",
+   "name": "Ford and Lincoln",
+   "makes": [
+    "Ford",
+    "Lincoln"
+   ],
+   "dids": 442,
+   "values": 682,
+   "confirmed": 605,
+   "bytes": 45116
+  },
+  {
+   "key": "gm",
+   "name": "GM (Chevrolet, Cadillac, GMC, Buick, Holden)",
+   "makes": [
+    "Buick",
+    "Cadillac",
+    "Chevrolet",
+    "GMC",
+    "Holden"
+   ],
+   "dids": 640,
+   "values": 749,
+   "confirmed": 591,
+   "bytes": 51703
+  },
+  {
+   "key": "haval",
+   "name": "Haval",
+   "makes": [
+    "Haval"
+   ],
+   "dids": 106,
+   "values": 240,
+   "confirmed": 198,
+   "bytes": 13503
+  },
+  {
+   "key": "honda",
+   "name": "Honda and Acura",
+   "makes": [
+    "Acura",
+    "Honda"
+   ],
+   "dids": 300,
+   "values": 642,
+   "confirmed": 521,
+   "bytes": 38411
+  },
+  {
+   "key": "hyundai",
+   "name": "Hyundai, Kia and Genesis",
+   "makes": [
+    "Genesis",
+    "Hyundai",
+    "Kia"
+   ],
+   "dids": 101,
+   "values": 1173,
+   "confirmed": 1076,
+   "bytes": 68304
+  },
+  {
+   "key": "jlr",
+   "name": "Jaguar Land Rover (and Tata)",
+   "makes": [
+    "Jaguar",
+    "Land",
+    "Tata"
+   ],
+   "dids": 227,
+   "values": 302,
+   "confirmed": 157,
+   "bytes": 19397
+  },
+  {
+   "key": "mazda",
+   "name": "Mazda",
+   "makes": [
+    "Mazda"
+   ],
+   "dids": 990,
+   "values": 1446,
+   "confirmed": 472,
+   "bytes": 97821
+  },
+  {
+   "key": "mercedes",
+   "name": "Mercedes-Benz and smart",
+   "makes": [
+    "Mercedes",
+    "smart"
+   ],
+   "dids": 107,
+   "values": 257,
+   "confirmed": 38,
+   "bytes": 15011
+  },
+  {
+   "key": "mg",
+   "name": "MG",
+   "makes": [
+    "MG"
+   ],
+   "dids": 206,
+   "values": 396,
+   "confirmed": 347,
+   "bytes": 26151
+  },
+  {
+   "key": "mitsubishi",
+   "name": "Mitsubishi",
+   "makes": [
+    "Mitsubishi"
+   ],
+   "dids": 66,
+   "values": 106,
+   "confirmed": 29,
+   "bytes": 7108
+  },
+  {
+   "key": "nissan",
+   "name": "Nissan, Infiniti and Datsun",
+   "makes": [
+    "Datsun",
+    "INFINITI",
+    "Nissan",
+    "NissanInfiniti"
+   ],
+   "dids": 518,
+   "values": 814,
+   "confirmed": 626,
+   "bytes": 47873
+  },
+  {
+   "key": "renault",
+   "name": "Renault, Dacia and Alpine",
+   "makes": [
+    "Alpine",
+    "Dacia",
+    "Renault"
+   ],
+   "dids": 1250,
+   "values": 2080,
+   "confirmed": 531,
+   "bytes": 126914
+  },
+  {
+   "key": "stellantis",
+   "name": "Stellantis (Peugeot, Citroen, DS, Vauxhall / Opel, Fiat, Jeep, Chrysler, Dodge, Ram, Maserati, Alfa Romeo)",
+   "makes": [
+    "Abarth",
+    "Alfa",
+    "Chrysler",
+    "Citroen",
+    "DS",
+    "Dodge",
+    "FIAT",
+    "Fiat",
+    "Jeep",
+    "Maserati",
+    "Peugeot",
+    "Ram",
+    "VauxhallOpel"
+   ],
+   "dids": 751,
+   "values": 1425,
+   "confirmed": 932,
+   "bytes": 94678
+  },
+  {
+   "key": "subaru",
+   "name": "Subaru",
+   "makes": [
+    "Subaru"
+   ],
+   "dids": 293,
+   "values": 391,
+   "confirmed": 289,
+   "bytes": 27130
+  },
+  {
+   "key": "suzuki",
+   "name": "Suzuki",
+   "makes": [
+    "Suzuki"
+   ],
+   "dids": 383,
+   "values": 655,
+   "confirmed": 0,
+   "bytes": 42846
+  },
+  {
+   "key": "toyota",
+   "name": "Toyota, Lexus, Scion and Daihatsu",
+   "makes": [
+    "Daihatsu",
+    "Lexus",
+    "Scion",
+    "Toyota"
+   ],
+   "dids": 454,
+   "values": 839,
+   "confirmed": 594,
+   "bytes": 54489
+  },
+  {
+   "key": "volvo",
+   "name": "Volvo, Polestar and Lotus",
+   "makes": [
+    "Lotus",
+    "Polestar",
+    "Volvo"
+   ],
+   "dids": 642,
+   "values": 838,
+   "confirmed": 323,
+   "bytes": 55738
+  }
+ ]
+}

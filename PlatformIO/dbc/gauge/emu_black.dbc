@@ -1,0 +1,152 @@
+VERSION "c2g-draft-1"
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	BA_DEF_DEF_
+	SIG_VALTYPE_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: EMU_BLACK
+
+BO_ 1536 EMU_Base0: 8 EMU_BLACK
+ SG_ RPM : 0|16@1+ (1,0) [0|65535] "rpm" Vector__XXX
+ SG_ TPS : 16|8@1+ (0.5,0) [0|127.5] "%" Vector__XXX
+ SG_ IAT : 24|8@1- (1,0) [-128|127] "C" Vector__XXX
+ SG_ MAP : 32|16@1+ (1,0) [0|65535] "kPa" Vector__XXX
+ SG_ InjectorPW : 48|16@1+ (0.016129,0) [0|1057.014015] "ms" Vector__XXX
+
+BO_ 1537 EMU_Base1: 8 EMU_BLACK
+ SG_ AIN1 : 0|16@1+ (0.0048828125,0) [0|319.9951171875] "V" Vector__XXX
+ SG_ AIN2 : 16|16@1+ (0.0048828125,0) [0|319.9951171875] "V" Vector__XXX
+ SG_ AIN3 : 32|16@1+ (0.0048828125,0) [0|319.9951171875] "V" Vector__XXX
+ SG_ AIN4 : 48|16@1+ (0.0048828125,0) [0|319.9951171875] "V" Vector__XXX
+
+BO_ 1538 EMU_Base2: 8 EMU_BLACK
+ SG_ VehicleSpeed : 0|16@1+ (1,0) [0|65535] "km/h" Vector__XXX
+ SG_ Baro : 16|8@1+ (1,0) [0|255] "kPa" Vector__XXX
+ SG_ OilTemp : 24|8@1+ (1,0) [0|255] "C" Vector__XXX
+ SG_ OilPressure : 32|8@1+ (0.0625,0) [0|15.9375] "bar" Vector__XXX
+ SG_ FuelPressure : 40|8@1+ (0.0625,0) [0|15.9375] "bar" Vector__XXX
+ SG_ CLT : 48|16@1- (1,0) [-32768|32767] "C" Vector__XXX
+
+BO_ 1539 EMU_Base3: 8 EMU_BLACK
+ SG_ IgnitionAngle : 0|8@1- (0.5,0) [-64|63.5] "deg" Vector__XXX
+ SG_ DwellTime : 8|8@1+ (0.05,0) [0|12.75] "ms" Vector__XXX
+ SG_ Lambda : 16|8@1+ (0.0078125,0) [0|1.9921875] "lambda" Vector__XXX
+ SG_ LambdaCorrection : 24|8@1+ (0.5,0) [0|127.5] "%" Vector__XXX
+ SG_ EGT1 : 32|16@1+ (1,0) [0|65535] "C" Vector__XXX
+ SG_ EGT2 : 48|16@1+ (1,0) [0|65535] "C" Vector__XXX
+
+BO_ 1540 EMU_Base4: 8 EMU_BLACK
+ SG_ Gear : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ ECUTemp : 8|8@1- (1,0) [-128|127] "C" Vector__XXX
+ SG_ BatteryVoltage : 16|16@1+ (0.027,0) [0|1769.445] "V" Vector__XXX
+ SG_ ERR_CLT : 32|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_IAT : 33|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_MAP : 34|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_WBO : 35|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_EGT1 : 36|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_EGT2 : 37|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_EGT_ALARM : 38|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ KNOCKING : 39|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_FLEXFUEL : 40|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_DBW : 41|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ERR_FPR : 42|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_GEARCUT : 48|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_ALS : 49|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_LAUNCH : 50|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_IDLE : 51|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_TABLESET2 : 52|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_TC_INTERVENTION : 53|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_PIT_LIMITER : 54|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FLAG_BRAKE_SWITCH : 55|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ EthanolContent : 56|8@1+ (1,0) [0|255] "%" Vector__XXX
+
+BO_ 1541 EMU_Base5: 8 EMU_BLACK
+ SG_ DBWPosition : 0|8@1+ (0.5,0) [0|127.5] "%" Vector__XXX
+ SG_ DBWTarget : 8|8@1+ (0.5,0) [0|127.5] "%" Vector__XXX
+ SG_ TC_DRPM_Raw : 16|16@1- (1,0) [-32768|32767] "" Vector__XXX
+ SG_ TC_DRPM : 32|16@1+ (1,0) [0|65535] "" Vector__XXX
+ SG_ TC_TorqueReduction : 48|8@1+ (1,0) [0|255] "%" Vector__XXX
+ SG_ PitLimiterTorqueReduction : 56|8@1+ (1,0) [0|255] "%" Vector__XXX
+
+BO_ 1542 EMU_Base6: 8 EMU_BLACK
+ SG_ AIN5 : 0|16@1+ (0.0048828125,0) [0|319.9951171875] "V" Vector__XXX
+ SG_ AIN6 : 16|16@1+ (0.0048828125,0) [0|319.9951171875] "V" Vector__XXX
+ SG_ OUTFLAGS1 : 32|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ OUTFLAGS2 : 40|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ OUTFLAGS3 : 48|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ OUTFLAGS4 : 56|8@1+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 1543 EMU_Base7: 8 EMU_BLACK
+ SG_ BoostTarget : 0|16@1+ (1,0) [0|65535] "kPa" Vector__XXX
+ SG_ PWM1_DC : 16|8@1+ (1,0) [0|255] "%" Vector__XXX
+ SG_ DSGMode : 24|4@1+ (1,0) [0|15] "" Vector__XXX
+ SG_ LambdaTarget : 32|8@1+ (0.01,0) [0|2.55] "lambda" Vector__XXX
+ SG_ PWM2_DC : 40|8@1+ (1,0) [0|255] "%" Vector__XXX
+ SG_ FuelUsed : 48|16@1+ (0.01,0) [0|655.35] "L" Vector__XXX
+
+
+CM_ "DRAFT can2gauge DBC: ECUMaster EMU Black CAN stream (base ID default 0x600, movable). Written from the published layout, not copied from any maker DBC. Gauge-unit conversions (kPa->mbar/bar, K->C) are done by the gauge.";
+CM_ BO_ 1536 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream. Rate not documented.";
+CM_ SG_ 1536 TPS "Manual: TPS 0-100 %, 0.5 %/bit. On a drive-by-wire setup this may be the pedal rather than the blade (DBW position is on base+5) - UNVERIFIED which.";
+CM_ SG_ 1536 MAP "Absolute, kPa (gauge 'map' is mbar: x10).";
+CM_ SG_ 1536 InjectorPW "Manual multiplier 1/62.";
+CM_ BO_ 1537 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream.";
+CM_ BO_ 1538 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream.";
+CM_ SG_ 1538 Baro "50-130 kPa. Good fingerprint byte: sits near 95-103 at sea level.";
+CM_ SG_ 1538 OilTemp "Manual: 8-bit unsigned 0-160 C (cannot show below 0 C).";
+CM_ BO_ 1539 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream.";
+CM_ SG_ 1539 Lambda "Manual multiplier 1/128.";
+CM_ SG_ 1539 LambdaCorrection "75-125 %, 100 = no correction.";
+CM_ BO_ 1540 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream.";
+CM_ SG_ 1540 Gear "Manual: 8-bit unsigned 0-7. ECUMaster forum (2025) notes the calibration runs -1..7, so reverse may arrive as 255 - UNVERIFIED (no label given for it on purpose).";
+CM_ SG_ 1540 ERR_FPR "Error Flag bit 10: fuel pressure relative error.";
+CM_ BO_ 1541 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream.";
+CM_ BO_ 1542 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream.";
+CM_ SG_ 1542 OUTFLAGS1 "Bits: 0-4 parametric outputs 1-5, 5-7 virtual outputs 1-3.";
+CM_ SG_ 1542 OUTFLAGS2 "Bits 0-7: CAN switches 1-8.";
+CM_ SG_ 1542 OUTFLAGS3 "Bits: 0-2 switches 1-3, 3-5 mux switches 1-3, 6 launch map set, 7 ALS map set.";
+CM_ SG_ 1542 OUTFLAGS4 "Bits: 0 fuel pump, 1 coolant fan, 2 AC clutch, 3 AC fan, 4 nitrous, 5 starter request, 6 boost map set.";
+CM_ BO_ 1543 "Source: EMU Black manual doc 1.4 (fw 2.169+) ch.6 CAN Stream. Community EMUcan library: bytes 4-7 only sent since EMU fw 'version 143' (shorter frame before) - UNVERIFIED.";
+CM_ SG_ 1543 DSGMode "Manual: 4-bit enumeration in byte 3 (2=P 3=R 4=N 5=D 6=S 7=M 15=fault). Which nibble is not stated: low nibble assumed; EMUcan reads the whole byte - UNVERIFIED.";
+BA_DEF_ SG_ "GaugeKey" STRING ;
+BA_DEF_ SG_ "GaugePriority" INT 0 9;
+BA_DEF_ "GaugeRelocatable" INT 0 1;
+BA_DEF_ "GaugeBusSpeed" INT 0 1000000;
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_DEF_DEF_ "GaugeKey" "";
+BA_DEF_DEF_ "GaugePriority" 0;
+BA_DEF_DEF_ "GaugeRelocatable" 0;
+BA_DEF_DEF_ "GaugeBusSpeed" 500000;
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_ "GaugeBusSpeed" 1000000;
+BA_ "GaugeRelocatable" 1;
+BA_ "GaugeKey" SG_ 1536 RPM "rpm";
+BA_ "GaugeKey" SG_ 1536 TPS "throttle";
+BA_ "GaugeKey" SG_ 1536 IAT "iat";
+BA_ "GaugeKey" SG_ 1536 MAP "map";
+BA_ "GaugeKey" SG_ 1538 VehicleSpeed "speed";
+BA_ "GaugeKey" SG_ 1538 OilTemp "oiltemp";
+BA_ "GaugeKey" SG_ 1538 OilPressure "oilPressure";
+BA_ "GaugeKey" SG_ 1538 FuelPressure "fuelPressure";
+BA_ "GaugeKey" SG_ 1538 CLT "coolant";
+BA_ "GaugeKey" SG_ 1539 IgnitionAngle "timing";
+BA_ "GaugeKey" SG_ 1539 Lambda "lambda";
+BA_ "GaugeKey" SG_ 1539 EGT1 "egt";
+BA_ "GaugePriority" SG_ 1539 EGT1 2;
+BA_ "GaugeKey" SG_ 1539 EGT2 "egt";
+BA_ "GaugePriority" SG_ 1539 EGT2 1;
+BA_ "GaugeKey" SG_ 1540 Gear "gear";
+BA_ "GaugeKey" SG_ 1540 BatteryVoltage "batt";
+BA_ "GaugeKey" SG_ 1540 EthanolContent "ethanol";
+BA_ "GaugeKey" SG_ 1543 DSGMode "selector";
+BA_ "GaugeKey" SG_ 1543 LambdaTarget "lambdaTarget";
+VAL_ 1540 Gear 0 "N" ;
+VAL_ 1543 DSGMode 2 "P" 3 "R" 4 "N" 5 "D" 6 "S" 7 "M" 15 "Fault" ;

@@ -1,0 +1,1 @@
+{ "name": "CST8xx_Touch", "version": "1.0.0", "description": "CST816/CST820 capacitive touch (I2C 0x15) on the 2.1in panel flex", "frameworks": "arduino", "platforms": "espressif32" }

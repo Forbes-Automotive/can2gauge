@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<!-- make_menu_icons.py opens this in headless Edge: every icon in menu_icons.js is drawn once per colour layer (white on
+     transparent, the other colours transparent), cropped to its ink, and written to <pre id="out"> as JSON. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>menu icon export</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;800&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="menu_icons.js"></script>
+</head>
+<body>
+<pre id="out">pending</pre>
+<script>
+"use strict";
+const SCALE = 1.15, W = 240, H = 200; // the menu draws icons at 1.15 around (240, 168)
+const ROLES = ["line", "muted", "acc2", "acc"]; // paint order: tracks, greys, then the accents on top
+async function run() {
+  try {
+    await Promise.all(["500 13px Montserrat", "700 15px Montserrat", "700 26px Montserrat", "800 44px Montserrat", "800 72px Montserrat",
+      "500 13px 'Roboto Mono'"].map((f) => document.fonts.load(f)));
+  } catch (e) { /* offline: system fonts */ }
+  const out = {};
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const g = cv.getContext("2d", { willReadFrequently: true });
+  for (const name of MenuIcons.names) {
+    out[name] = [];
+    for (const role of ROLES) {
+      const K = {}; ROLES.forEach((r) => (K[r] = () => (r === role ? "#ffffff" : "rgba(0,0,0,0)")));
+      g.clearRect(0, 0, W, H);
+      MenuIcons.draw(g, name, W / 2, H / 2, SCALE, K);
+      const d = g.getImageData(0, 0, W, H).data;
+      let x0 = W, y0 = H, x1 = -1, y1 = -1;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 2) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      if (x1 < 0) continue;
+      const w = x1 - x0 + 1, h = y1 - y0 + 1, a = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) a[y * w + x] = d[((y0 + y) * W + x0 + x) * 4 + 3];
+      let bin = ""; a.forEach((v) => (bin += String.fromCharCode(v)));
+      // dx / dy: the layer's centre relative to the icon centre
+      out[name].push({ role, w, h, dx: x0 + w / 2 - W / 2, dy: y0 + h / 2 - H / 2, alpha: btoa(bin) });
+    }
+  }
+  document.getElementById("out").textContent = JSON.stringify(out);
+}
+run();
+</script>
+</body>
+</html>

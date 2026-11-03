@@ -1,0 +1,621 @@
+VERSION "c2g-draft-1"
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	BA_DEF_DEF_
+	SIG_VALTYPE_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: HALTECH
+
+BO_ 864 HT_360: 8 HALTECH
+ SG_ RPM : 7|16@0+ (1,0) [0|65535] "rpm" Vector__XXX
+ SG_ ManifoldPressure : 23|16@0+ (0.1,0) [0|6553.5] "kPa" Vector__XXX
+ SG_ ThrottlePosition : 39|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ CoolantPressure : 55|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+
+BO_ 865 HT_361: 8 HALTECH
+ SG_ FuelPressure : 7|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ OilPressure : 23|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ EngineDemand : 39|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ WastegatePressure : 55|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+
+BO_ 866 HT_362: 8 HALTECH
+ SG_ InjStage1Duty : 7|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ InjStage2Duty : 23|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ IgnitionAngleLeading : 39|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+
+BO_ 867 HT_363: 8 HALTECH
+ SG_ WheelSlip : 7|16@0- (0.1,0) [-3276.8|3276.7] "km/h" Vector__XXX
+ SG_ WheelDiff : 23|16@0- (0.1,0) [-3276.8|3276.7] "km/h" Vector__XXX
+ SG_ LaunchControlEndRPM : 55|16@0+ (1,0) [0|65535] "rpm" Vector__XXX
+
+BO_ 868 HT_364: 8 HALTECH
+ SG_ InjStage1AvgTime : 7|16@0+ (0.001,0) [0|65.535] "ms" Vector__XXX
+ SG_ InjStage2AvgTime : 23|16@0+ (0.001,0) [0|65.535] "ms" Vector__XXX
+ SG_ InjStage3AvgTime : 39|16@0+ (0.001,0) [0|65.535] "ms" Vector__XXX
+ SG_ InjStage4AvgTime : 55|16@0+ (0.001,0) [0|65.535] "ms" Vector__XXX
+
+BO_ 872 HT_368: 8 HALTECH
+ SG_ Wideband1 : 7|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband2 : 23|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband3 : 39|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband4 : 55|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+
+BO_ 873 HT_369: 8 HALTECH
+ SG_ TriggerErrorCount : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ TriggerCounter : 23|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ TriggerSyncLevel : 55|16@0+ (1,0) [0|65535] "" Vector__XXX
+
+BO_ 874 HT_36A: 8 HALTECH
+ SG_ KnockLevel1 : 7|16@0+ (0.01,0) [0|655.35] "dB" Vector__XXX
+ SG_ KnockLevel2 : 23|16@0+ (0.01,0) [0|655.35] "dB" Vector__XXX
+
+BO_ 875 HT_36B: 8 HALTECH
+ SG_ BrakePressureFront : 7|16@0+ (1,-101.3) [-101.3|65433.7] "kPa" Vector__XXX
+ SG_ NOSPressure1 : 23|16@0+ (0.22,-101.3) [-101.3|14316.4] "kPa" Vector__XXX
+ SG_ TurboSpeed1 : 39|16@0+ (10,0) [0|655350] "rpm" Vector__XXX
+ SG_ LateralG : 55|16@0- (0.1,0) [-3276.8|3276.7] "m/s2" Vector__XXX
+
+BO_ 876 HT_36C: 8 HALTECH
+ SG_ WheelSpeedFL : 7|16@0+ (0.1,0) [0|6553.5] "km/h" Vector__XXX
+ SG_ WheelSpeedFR : 23|16@0+ (0.1,0) [0|6553.5] "km/h" Vector__XXX
+ SG_ WheelSpeedRL : 39|16@0+ (0.1,0) [0|6553.5] "km/h" Vector__XXX
+ SG_ WheelSpeedRR : 55|16@0+ (0.1,0) [0|6553.5] "km/h" Vector__XXX
+
+BO_ 877 HT_36D: 8 HALTECH
+ SG_ ExhaustCamAngle1 : 39|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+ SG_ ExhaustCamAngle2 : 55|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+
+BO_ 878 HT_36E: 8 HALTECH
+ SG_ EngineLimitingActive : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ LaunchIgnRetard : 23|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+ SG_ LaunchFuelEnrich : 39|16@0- (0.1,0) [-3276.8|3276.7] "%" Vector__XXX
+ SG_ LongitudinalG : 55|16@0- (0.1,0) [-3276.8|3276.7] "m/s2" Vector__XXX
+
+BO_ 879 HT_36F: 8 HALTECH
+ SG_ GenericOutput1Duty : 7|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ BoostControlOutput : 23|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+
+BO_ 880 HT_370: 8 HALTECH
+ SG_ VehicleSpeed : 7|16@0+ (0.1,0) [0|6553.5] "km/h" Vector__XXX
+ SG_ CombinedSelector : 23|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ CombinedGear : 31|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ IntakeCamAngle1 : 39|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+ SG_ IntakeCamAngle2 : 55|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+
+BO_ 881 HT_371: 8 HALTECH
+ SG_ FuelFlow : 7|16@0+ (1,0) [0|65535] "cc/min" Vector__XXX
+ SG_ FuelFlowReturn : 23|16@0+ (1,0) [0|65535] "cc/min" Vector__XXX
+
+BO_ 882 HT_372: 8 HALTECH
+ SG_ BatteryVoltage : 7|16@0+ (0.1,0) [0|6553.5] "V" Vector__XXX
+ SG_ TargetBoost : 39|16@0+ (0.1,0) [0|6553.5] "kPa" Vector__XXX
+ SG_ BaroPressure : 55|16@0+ (0.1,0) [0|6553.5] "kPa" Vector__XXX
+
+BO_ 883 HT_373: 8 HALTECH
+ SG_ EGT1 : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT2 : 23|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT3 : 39|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT4 : 55|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+
+BO_ 884 HT_374: 8 HALTECH
+ SG_ EGT5 : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT6 : 23|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT7 : 39|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT8 : 55|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+
+BO_ 885 HT_375: 8 HALTECH
+ SG_ EGT9 : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT10 : 23|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT11 : 39|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ EGT12 : 55|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+
+BO_ 886 HT_376: 8 HALTECH
+ SG_ AmbientAirTemp : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ RelativeHumidity : 23|16@0- (0.1,0) [-3276.8|3276.7] "%" Vector__XXX
+ SG_ SpecificHumidity : 39|16@0+ (100,0) [0|6553500] "ppm" Vector__XXX
+ SG_ AbsoluteHumidity : 55|16@0+ (0.1,0) [0|6553.5] "g/m3" Vector__XXX
+
+BO_ 887 HT_377: 8 HALTECH
+ SG_ BoostPreIntercooler : 7|16@0+ (0.1,0) [0|6553.5] "kPa" Vector__XXX
+
+BO_ 896 HT_380: 8 HALTECH
+ SG_ GenericOutput1Value : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericOutput2Value : 23|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericOutput3Value : 39|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericOutput4Value : 55|16@0+ (1,0) [0|65535] "" Vector__XXX
+
+BO_ 992 HT_3E0: 8 HALTECH
+ SG_ CoolantTemp : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ AirTemp : 23|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ FuelTemp : 39|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ OilTemp : 55|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+
+BO_ 993 HT_3E1: 8 HALTECH
+ SG_ GearboxOilTemp : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ DiffOilTemp : 23|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ FuelComposition : 39|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ AirTempPreIntercooler : 55|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+
+BO_ 994 HT_3E2: 8 HALTECH
+ SG_ FuelLevel : 7|16@0+ (0.1,0) [0|6553.5] "L" Vector__XXX
+ SG_ FuelEstimatedFlow : 23|16@0- (0.1,0) [-3276.8|3276.7] "cc/min" Vector__XXX
+ SG_ AvgFuelMileage : 39|16@0+ (0.1,0) [0|6553.5] "km/L" Vector__XXX
+ SG_ FuelLevel_B6 : 55|16@0+ (0.1,0) [0|6553.5] "L" Vector__XXX
+
+BO_ 995 HT_3E3: 8 HALTECH
+ SG_ STFTBank1 : 7|16@0- (0.1,0) [-3276.8|3276.7] "%" Vector__XXX
+ SG_ STFTBank2 : 23|16@0- (0.1,0) [-3276.8|3276.7] "%" Vector__XXX
+ SG_ LTFTBank1 : 39|16@0- (0.1,0) [-3276.8|3276.7] "%" Vector__XXX
+ SG_ LTFTBank2 : 55|16@0- (0.1,0) [-3276.8|3276.7] "%" Vector__XXX
+
+BO_ 996 HT_3E4: 8 HALTECH
+ SG_ NeutralSwitch : 15|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ReverseSwitch : 14|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ GearSwitch : 13|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ DecelCutActive : 12|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TransientThrottleActive : 11|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BrakePedalSwitch : 10|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ClutchSwitch : 9|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ OilPressureLight : 8|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ LaunchControlActive : 23|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ LaunchControlSwitch : 22|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ AuxRPMLimiterActive : 21|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BrakeFluidLevelSwitch : 20|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ FlatShiftSwitch : 19|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ClutchPressureSensor : 18|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TorqueReductionActive : 17|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TractionControlEnabled : 31|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TractionControlActive : 30|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ AirConRequest : 29|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ AirConOutput : 28|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ThermoFan4On : 27|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ThermoFan3On : 26|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ThermoFan2On : 25|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ThermoFan1On : 24|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ RotaryTrimPot1 : 39|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ RotaryTrimPot2 : 47|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ RotaryTrimPot3 : 55|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ CheckEngineLight : 63|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BatteryLight : 62|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ HandBrake : 57|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TractionControlLight : 56|1@1+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 997 HT_3E5: 8 HALTECH
+ SG_ IgnitionSwitch : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ TurboTimerRemaining : 15|8@0+ (1,0) [0|255] "s" Vector__XXX
+ SG_ TurboTimerEngineRemaining : 23|8@0+ (1,0) [0|255] "s" Vector__XXX
+ SG_ PitLimiterError : 30|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ PitLimiterActive : 29|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ PitLimiterSwitch : 28|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ABSError : 26|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ABSActive : 25|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ABSArmed : 24|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ SteeringWheelAngle : 39|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+ SG_ DriveshaftRPM : 55|16@0+ (1,0) [0|65535] "rpm" Vector__XXX
+
+BO_ 998 HT_3E6: 8 HALTECH
+ SG_ NOSPressure2 : 7|16@0+ (0.22,-101.3) [-101.3|14316.4] "kPa" Vector__XXX
+ SG_ NOSPressure3 : 23|16@0+ (0.22,-101.3) [-101.3|14316.4] "kPa" Vector__XXX
+ SG_ NOSPressure4 : 39|16@0+ (0.22,-101.3) [-101.3|14316.4] "kPa" Vector__XXX
+ SG_ TurboSpeed2 : 55|16@0+ (10,0) [0|655350] "rpm" Vector__XXX
+
+BO_ 999 HT_3E7: 8 HALTECH
+ SG_ GenericSensor1 : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericSensor2 : 23|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericSensor3 : 39|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericSensor4 : 55|16@0+ (1,0) [0|65535] "" Vector__XXX
+
+BO_ 1000 HT_3E8: 8 HALTECH
+ SG_ GenericSensor5 : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericSensor6 : 23|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericSensor7 : 39|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericSensor8 : 55|16@0+ (1,0) [0|65535] "" Vector__XXX
+
+BO_ 1001 HT_3E9: 8 HALTECH
+ SG_ GenericSensor9 : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ GenericSensor10 : 23|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ TargetLambda : 39|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ NitrousStage1 : 55|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ NitrousStage2 : 54|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ NitrousStage3 : 53|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ NitrousStage4 : 52|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ NitrousStage5 : 51|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ NitrousStage6 : 50|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ WaterInjectionAdvanced : 49|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TorqueManagementKnob : 63|8@0- (1,0) [-128|127] "" Vector__XXX
+
+BO_ 1002 HT_3EA: 8 HALTECH
+ SG_ GearboxLinePressure : 7|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ InjStage3Duty : 23|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ InjStage4Duty : 39|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ CrankCasePressure : 55|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+
+BO_ 1003 HT_3EB: 8 HALTECH
+ SG_ RaceTimer : 7|32@0+ (1,0) [0|4294967295] "ms" Vector__XXX
+ SG_ IgnitionAngleBank1 : 39|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+ SG_ IgnitionAngleBank2 : 55|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+
+BO_ 1004 HT_3EC: 8 HALTECH
+ SG_ TMDriveshaftRPMTarget : 7|16@0- (1,0) [-32768|32767] "rpm" Vector__XXX
+ SG_ TMDriveshaftRPMTargetError : 23|16@0- (1,0) [-32768|32767] "rpm" Vector__XXX
+ SG_ TMTargetErrorIgnCorr : 39|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+ SG_ TMTimedIgnCorr : 55|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+
+BO_ 1005 HT_3ED: 8 HALTECH
+ SG_ TMCombinedIgnCorr : 7|16@0- (0.1,0) [-3276.8|3276.7] "deg" Vector__XXX
+
+BO_ 1006 HT_3EE: 8 HALTECH
+ SG_ Wideband5 : 7|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband6 : 23|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband7 : 39|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband8 : 55|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+
+BO_ 1007 HT_3EF: 8 HALTECH
+ SG_ Wideband9 : 7|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband10 : 23|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband11 : 39|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ Wideband12 : 55|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+
+BO_ 1008 HT_3F0: 8 HALTECH
+ SG_ ShockTravelFLRaw : 7|16@0+ (0.1,0) [0|6553.5] "mm" Vector__XXX
+ SG_ ShockTravelFRRaw : 23|16@0+ (0.1,0) [0|6553.5] "mm" Vector__XXX
+ SG_ ShockTravelRLRaw : 39|16@0+ (0.1,0) [0|6553.5] "mm" Vector__XXX
+ SG_ ShockTravelRRRaw : 55|16@0+ (0.1,0) [0|6553.5] "mm" Vector__XXX
+
+BO_ 1009 HT_3F1: 8 HALTECH
+ SG_ ShockTravelFL : 7|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+ SG_ ShockTravelFR : 23|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+ SG_ ShockTravelRL : 39|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+ SG_ ShockTravelRR : 55|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+
+BO_ 1010 HT_3F2: 8 HALTECH
+ SG_ RideHeightFront : 7|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+ SG_ RideHeightFrontRaw : 23|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+ SG_ RideHeightFrontRate : 39|16@0- (0.1,0) [-3276.8|3276.7] "mm/s" Vector__XXX
+
+BO_ 1011 HT_3F3: 8 HALTECH
+ SG_ RideHeightRear : 7|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+ SG_ RideHeightRearRaw : 23|16@0- (0.1,0) [-3276.8|3276.7] "mm" Vector__XXX
+ SG_ RideHeightRearRate : 39|16@0- (0.1,0) [-3276.8|3276.7] "mm/s" Vector__XXX
+
+BO_ 1129 HT_469: 8 HALTECH
+ SG_ ECUTemp : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ OilLevel : 39|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+
+BO_ 1136 HT_470: 8 HALTECH
+ SG_ WidebandOverall : 7|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ WidebandBank1 : 23|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ WidebandBank2 : 39|16@0+ (0.001,0) [0|65.535] "lambda" Vector__XXX
+ SG_ GearSelectorPosition : 55|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ Gear : 63|8@0- (1,0) [-128|127] "" Vector__XXX
+
+BO_ 1137 HT_471: 8 HALTECH
+ SG_ InjectorPressureDiff : 7|16@0- (0.1,0) [-3276.8|3276.7] "kPa" Vector__XXX
+ SG_ AcceleratorPedal : 23|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ ExhaustManifoldPressure : 39|16@0+ (0.1,0) [0|6553.5] "kPa" Vector__XXX
+
+BO_ 1138 HT_472: 8 HALTECH
+ SG_ CruiseTargetSpeed : 7|16@0+ (0.1,0) [0|6553.5] "km/h" Vector__XXX
+ SG_ CruiseLastTargetSpeed : 23|16@0+ (0.1,0) [0|6553.5] "km/h" Vector__XXX
+ SG_ CruiseSpeedError : 39|16@0- (0.1,0) [-3276.8|3276.7] "km/h" Vector__XXX
+ SG_ CruiseControllerState : 55|4@0+ (1,0) [0|15] "" Vector__XXX
+ SG_ CruiseInputState : 51|12@0+ (1,0) [0|4095] "" Vector__XXX
+
+BO_ 1139 HT_473: 8 HALTECH
+ SG_ TotalFuelUsed : 7|32@0+ (1,0) [0|4294967295] "cc" Vector__XXX
+ SG_ SwitchBits4 : 39|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ NitrousBits5 : 47|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ NitrousOverrideBits6 : 55|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ CutPercentageMethod : 59|4@0+ (1,0) [0|15] "" Vector__XXX
+
+BO_ 1140 HT_474: 8 HALTECH
+ SG_ VerticalG : 7|16@0- (0.1,0) [-3276.8|3276.7] "m/s2" Vector__XXX
+ SG_ PitchRate : 23|16@0- (0.1,0) [-3276.8|3276.7] "deg/s" Vector__XXX
+ SG_ RollRate : 39|16@0- (0.1,0) [-3276.8|3276.7] "deg/s" Vector__XXX
+ SG_ YawRate : 55|16@0- (0.1,0) [-3276.8|3276.7] "deg/s" Vector__XXX
+
+BO_ 1141 HT_475: 8 HALTECH
+ SG_ FuelPumpDutyPrimary : 7|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ FuelPumpDutyAux1 : 23|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ FuelPumpDutyAux2 : 39|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ FuelPumpDutyAux3 : 55|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+
+BO_ 1142 HT_476: 8 HALTECH
+ SG_ BrakePressureRear : 7|16@0+ (1,-101.3) [-101.3|65433.7] "kPa" Vector__XXX
+ SG_ BrakeFrontRatio : 23|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ BrakeRearRatio : 39|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ BrakePressureDiff : 55|16@0- (1,0) [-32768|32767] "kPa" Vector__XXX
+
+BO_ 1143 HT_477: 8 HALTECH
+ SG_ EngineLimiterMaxRPM : 7|16@0+ (1,0) [0|65535] "rpm" Vector__XXX
+ SG_ CutPercentage : 23|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+ SG_ EngineLimiterFunction : 39|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ RPMLimiterFunction : 47|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ CutPercentageFunction : 55|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ EngineLimiterMethod : 63|4@0+ (1,0) [0|15] "" Vector__XXX
+ SG_ RPMLimiterMethod : 59|4@0+ (1,0) [0|15] "" Vector__XXX
+
+BO_ 1776 HT_6F0: 8 HALTECH
+ SG_ TyrePressureFL : 7|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ TyrePressureFR : 23|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ TyrePressureRL : 39|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ TyrePressureRR : 55|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+
+BO_ 1777 HT_6F1: 8 HALTECH
+ SG_ TyreTempFL : 7|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ TyreTempFR : 23|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ TyreTempRL : 39|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ TyreTempRR : 55|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+
+BO_ 1778 HT_6F2: 8 HALTECH
+ SG_ TyreSensorBattFL : 7|16@0+ (0.001,0) [0|65.535] "V" Vector__XXX
+ SG_ TyreSensorBattFR : 23|16@0+ (0.001,0) [0|65.535] "V" Vector__XXX
+ SG_ TyreSensorBattRL : 39|16@0+ (0.001,0) [0|65.535] "V" Vector__XXX
+ SG_ TyreSensorBattRR : 55|16@0+ (0.001,0) [0|65.535] "V" Vector__XXX
+
+BO_ 1779 HT_6F3: 8 HALTECH
+ SG_ FrontTyreRecommended : 7|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ RearTyreRecommended : 23|16@0+ (0.1,-101.3) [-101.3|6452.2] "kPa" Vector__XXX
+ SG_ TyreLeakRR : 35|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TyreLeakRL : 34|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TyreLeakFR : 33|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TyreLeakFL : 32|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ EngineProtectionLevel : 47|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ EngineProtectionReason : 55|16@0+ (1,0) [0|65535] "" Vector__XXX
+
+BO_ 1780 HT_6F4: 8 HALTECH
+ SG_ ParkLight : 0|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ HeadLight : 1|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ HighBeam : 2|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ LeftIndicator : 3|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ RightIndicator : 4|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ EngineState : 11|4@0+ (1,0) [0|15] "" Vector__XXX
+
+BO_ 1782 HT_6F6: 8 HALTECH
+ SG_ FuelUsedTrip1 : 7|32@0- (1,0) [-2147483648|2147483647] "cc" Vector__XXX
+ SG_ TripMeter1 : 39|32@0- (1,0) [-2147483648|2147483647] "m" Vector__XXX
+
+BO_ 1783 HT_6F7: 8 HALTECH
+ SG_ GenericOutputStates : 7|32@0+ (1,0) [0|4294967295] "" Vector__XXX
+ SG_ CalculatedAirTemp : 39|16@0+ (0.1,-273.15) [-273.15|6280.35] "C" Vector__XXX
+ SG_ WaterInjSolenoidDuty : 55|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+
+BO_ 1784 HT_6F8: 8 HALTECH
+ SG_ ExhaustCutoutState : 7|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ NitrousBottleOpenerState : 15|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ OpenLoopMotor1State : 23|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ OpenLoopMotor2State : 31|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ OpenLoopMotor3State : 39|8@0- (1,0) [-128|127] "" Vector__XXX
+ SG_ FuelLevelPercent0 : 55|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+
+BO_ 1785 HT_6F9: 8 HALTECH
+ SG_ FuelLevelPercent1 : 7|16@0+ (0.1,0) [0|6553.5] "%" Vector__XXX
+
+BO_ 1791 HT_6FF: 8 HALTECH
+ SG_ TorqueConverterPressure : 7|16@0- (0.1,-101.3) [-3378.1|3175.4] "kPa" Vector__XXX
+ SG_ TransferCasePressure : 23|16@0- (0.1,-101.3) [-3378.1|3175.4] "kPa" Vector__XXX
+ SG_ AirConPressure : 39|16@0- (0.01,-101.3) [-428.98|226.37] "kPa" Vector__XXX
+ SG_ PowerSteeringPressure : 55|16@0- (0.01,-101.3) [-428.98|226.37] "kPa" Vector__XXX
+
+BO_ 1792 HT_700: 8 HALTECH
+
+BO_ 1793 HT_701: 8 HALTECH
+ SG_ FuelEconomyAverage : 7|16@0+ (0.1,0) [0|6553.5] "L/100km" Vector__XXX
+ SG_ FuelEconomyInstant : 23|16@0+ (0.1,0) [0|6553.5] "L/100km" Vector__XXX
+ SG_ AirConTemp : 39|16@0- (0.1,-273.15) [-3549.95|3003.55] "C" Vector__XXX
+ SG_ FuelMileageInstant : 55|16@0+ (0.1,0) [0|6553.5] "km/L" Vector__XXX
+
+
+CM_ "DRAFT can2gauge DBC: Haltech Elite / Nexus ECU Broadcast CAN Protocol (doc v2.0, 08/2025; Elite fw 3.11+, Nexus 1.25+). Fixed IDs, 1 Mbit, big-endian. Earlier firmware sends a subset; the 2012 Platinum 'V2' layout differs in 0x361, 0x370, 0x372 and 0x3E4.";
+CM_ BO_ 864 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ SG_ 864 ManifoldPressure "Absolute kPa (gauge 'map' is mbar: x10).";
+CM_ BO_ 865 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). 2012 V2.0 doc had accelerator pedal in bytes 4-5; current doc says Engine Demand.";
+CM_ SG_ 865 FuelPressure "Gauge kPa = raw/10 - 101.3 (gauge 'fuelPressure' is bar: /100).";
+CM_ SG_ 865 OilPressure "Gauge kPa = raw/10 - 101.3 (gauge 'oilPressure' is bar: /100).";
+CM_ BO_ 866 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 867 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 868 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 872 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 873 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 874 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 875 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 876 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 877 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 878 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 879 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 880 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). 2012 V2.0 doc: bytes 2-3 = Gear (0 neutral, 1 first).";
+CM_ SG_ 880 CombinedSelector "Combined Gear (bytes 2-3, signed): selector = high byte. Splitting into two signed bytes assumes the same enum as 0x470 - UNVERIFIED.";
+CM_ SG_ 880 CombinedGear "Combined Gear low byte = gear.";
+CM_ BO_ 881 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 882 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). 2012 V2.0 doc: bytes 2-3 = Air Temp Sensor 2.";
+CM_ SG_ 882 BaroPressure "Absolute. Fingerprint: raw ~950-1050 big-endian.";
+CM_ BO_ 883 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 884 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 885 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 886 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 887 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 896 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 992 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Temperatures are Kelvin x10; converted to C here (offset -273.15).";
+CM_ SG_ 992 CoolantTemp "Fingerprint: raw ~2731-3731 (0-100 C).";
+CM_ BO_ 993 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 994 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ SG_ 994 FuelLevel_B6 "Doc lists 'Fuel Level' twice (bytes 0-1 and 6-7) - UNVERIFIED what bytes 6-7 really are.";
+CM_ BO_ 995 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 996 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Bit map differs completely from the 2012 V2.0 doc.";
+CM_ BO_ 997 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 998 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 999 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Generic sensors: scaling depends on the sensor type set in NSP (see doc 'Generic Sensors').";
+CM_ BO_ 1000 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Same ID as a Link Generic Dash on its usual ID 1000.";
+CM_ BO_ 1001 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1002 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1003 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1004 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1005 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1006 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1007 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1008 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1009 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1010 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Elite 3.11 / Nexus 1.25+.";
+CM_ SG_ 1010 RideHeightFront "0 = error.";
+CM_ BO_ 1011 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Elite 3.11 / Nexus 1.25+.";
+CM_ SG_ 1011 RideHeightRear "0 = error.";
+CM_ BO_ 1129 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1136 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). In V2.35.0 only bytes 6-7 were listed.";
+CM_ SG_ 1136 GearSelectorPosition "1-10 = manual gate positions (no selector letter).";
+CM_ BO_ 1137 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1138 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ SG_ 1138 CruiseInputState "Bit-field 6:3-7:0 (values in doc).";
+CM_ BO_ 1139 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Bytes 4-6 = antilag / fuel pump / nitrous / water-injection switch and output bits (see doc).";
+CM_ BO_ 1140 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1141 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1142 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1143 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1776 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1777 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1778 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1779 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ SG_ 1779 EngineProtectionReason "OBD-style DTC: top 2 bits P/B/C/U, rest = code in hex.";
+CM_ BO_ 1780 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ SG_ 1780 EngineState "Doc: bits 1:0-1:3.";
+CM_ BO_ 1782 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1783 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ SG_ 1783 GenericOutputStates "Bit X = generic output X+1.";
+CM_ BO_ 1784 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1785 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ BO_ 1791 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). 0 = error on all four.";
+CM_ SG_ 1791 AirConPressure "Doc layout suggests raw/100 - 101.3 for bytes 4-7 - UNVERIFIED.";
+CM_ SG_ 1791 PowerSteeringPressure "UNVERIFIED scale, as above.";
+CM_ BO_ 1792 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025). Internal R5 PDM data per Haltech's Multiplexed (PD16) protocol - not decoded here.";
+CM_ BO_ 1793 "Source: Haltech ECU Broadcast CAN Protocol doc v2.0 (08/2025).";
+CM_ SG_ 1793 FuelMileageInstant "Doc says bytes 5-6, which overlaps bytes 4-5; 6-7 assumed - UNVERIFIED.";
+BA_DEF_ SG_ "GaugeKey" STRING ;
+BA_DEF_ SG_ "GaugePriority" INT 0 9;
+BA_DEF_ "GaugeRelocatable" INT 0 1;
+BA_DEF_ "GaugeBusSpeed" INT 0 1000000;
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_DEF_DEF_ "GaugeKey" "";
+BA_DEF_DEF_ "GaugePriority" 0;
+BA_DEF_DEF_ "GaugeRelocatable" 0;
+BA_DEF_DEF_ "GaugeBusSpeed" 500000;
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_ "GaugeBusSpeed" 1000000;
+BA_ "GaugeRelocatable" 0;
+BA_ "GenMsgCycleTime" BO_ 864 20;
+BA_ "GenMsgCycleTime" BO_ 865 20;
+BA_ "GenMsgCycleTime" BO_ 866 20;
+BA_ "GenMsgCycleTime" BO_ 867 50;
+BA_ "GenMsgCycleTime" BO_ 868 20;
+BA_ "GenMsgCycleTime" BO_ 872 50;
+BA_ "GenMsgCycleTime" BO_ 873 50;
+BA_ "GenMsgCycleTime" BO_ 874 50;
+BA_ "GenMsgCycleTime" BO_ 875 50;
+BA_ "GenMsgCycleTime" BO_ 876 50;
+BA_ "GenMsgCycleTime" BO_ 877 50;
+BA_ "GenMsgCycleTime" BO_ 878 50;
+BA_ "GenMsgCycleTime" BO_ 879 50;
+BA_ "GenMsgCycleTime" BO_ 880 50;
+BA_ "GenMsgCycleTime" BO_ 881 100;
+BA_ "GenMsgCycleTime" BO_ 882 100;
+BA_ "GenMsgCycleTime" BO_ 883 100;
+BA_ "GenMsgCycleTime" BO_ 884 100;
+BA_ "GenMsgCycleTime" BO_ 885 100;
+BA_ "GenMsgCycleTime" BO_ 886 100;
+BA_ "GenMsgCycleTime" BO_ 887 20;
+BA_ "GenMsgCycleTime" BO_ 896 100;
+BA_ "GenMsgCycleTime" BO_ 992 200;
+BA_ "GenMsgCycleTime" BO_ 993 200;
+BA_ "GenMsgCycleTime" BO_ 994 200;
+BA_ "GenMsgCycleTime" BO_ 995 200;
+BA_ "GenMsgCycleTime" BO_ 996 200;
+BA_ "GenMsgCycleTime" BO_ 997 20;
+BA_ "GenMsgCycleTime" BO_ 998 50;
+BA_ "GenMsgCycleTime" BO_ 999 50;
+BA_ "GenMsgCycleTime" BO_ 1000 50;
+BA_ "GenMsgCycleTime" BO_ 1001 50;
+BA_ "GenMsgCycleTime" BO_ 1002 20;
+BA_ "GenMsgCycleTime" BO_ 1003 20;
+BA_ "GenMsgCycleTime" BO_ 1004 20;
+BA_ "GenMsgCycleTime" BO_ 1005 20;
+BA_ "GenMsgCycleTime" BO_ 1006 50;
+BA_ "GenMsgCycleTime" BO_ 1007 50;
+BA_ "GenMsgCycleTime" BO_ 1008 20;
+BA_ "GenMsgCycleTime" BO_ 1009 20;
+BA_ "GenMsgCycleTime" BO_ 1010 50;
+BA_ "GenMsgCycleTime" BO_ 1011 50;
+BA_ "GenMsgCycleTime" BO_ 1129 200;
+BA_ "GenMsgCycleTime" BO_ 1136 50;
+BA_ "GenMsgCycleTime" BO_ 1137 20;
+BA_ "GenMsgCycleTime" BO_ 1138 50;
+BA_ "GenMsgCycleTime" BO_ 1139 100;
+BA_ "GenMsgCycleTime" BO_ 1140 50;
+BA_ "GenMsgCycleTime" BO_ 1141 200;
+BA_ "GenMsgCycleTime" BO_ 1142 50;
+BA_ "GenMsgCycleTime" BO_ 1143 100;
+BA_ "GenMsgCycleTime" BO_ 1776 200;
+BA_ "GenMsgCycleTime" BO_ 1777 200;
+BA_ "GenMsgCycleTime" BO_ 1778 200;
+BA_ "GenMsgCycleTime" BO_ 1779 200;
+BA_ "GenMsgCycleTime" BO_ 1780 10;
+BA_ "GenMsgCycleTime" BO_ 1782 200;
+BA_ "GenMsgCycleTime" BO_ 1783 100;
+BA_ "GenMsgCycleTime" BO_ 1784 200;
+BA_ "GenMsgCycleTime" BO_ 1785 200;
+BA_ "GenMsgCycleTime" BO_ 1791 50;
+BA_ "GenMsgCycleTime" BO_ 1792 20;
+BA_ "GenMsgCycleTime" BO_ 1793 50;
+BA_ "GaugeKey" SG_ 864 RPM "rpm";
+BA_ "GaugeKey" SG_ 864 ManifoldPressure "map";
+BA_ "GaugeKey" SG_ 864 ThrottlePosition "throttle";
+BA_ "GaugeKey" SG_ 865 FuelPressure "fuelPressure";
+BA_ "GaugeKey" SG_ 865 OilPressure "oilPressure";
+BA_ "GaugeKey" SG_ 866 InjStage1Duty "injDuty";
+BA_ "GaugeKey" SG_ 866 IgnitionAngleLeading "timing";
+BA_ "GaugeKey" SG_ 872 Wideband1 "lambda";
+BA_ "GaugePriority" SG_ 872 Wideband1 2;
+BA_ "GaugeKey" SG_ 880 VehicleSpeed "speed";
+BA_ "GaugeKey" SG_ 880 CombinedSelector "selector";
+BA_ "GaugePriority" SG_ 880 CombinedSelector 1;
+BA_ "GaugeKey" SG_ 880 CombinedGear "gear";
+BA_ "GaugePriority" SG_ 880 CombinedGear 1;
+BA_ "GaugeKey" SG_ 882 BatteryVoltage "batt";
+BA_ "GaugeKey" SG_ 883 EGT1 "egt";
+BA_ "GaugeKey" SG_ 886 AmbientAirTemp "ambient";
+BA_ "GaugeKey" SG_ 992 CoolantTemp "coolant";
+BA_ "GaugeKey" SG_ 992 AirTemp "iat";
+BA_ "GaugeKey" SG_ 992 OilTemp "oiltemp";
+BA_ "GaugeKey" SG_ 993 GearboxOilTemp "gboxTemp";
+BA_ "GaugeKey" SG_ 993 FuelComposition "ethanol";
+BA_ "GaugeKey" SG_ 1001 TargetLambda "lambdaTarget";
+BA_ "GaugeKey" SG_ 1136 GearSelectorPosition "selector";
+BA_ "GaugePriority" SG_ 1136 GearSelectorPosition 2;
+BA_ "GaugeKey" SG_ 1136 Gear "gear";
+BA_ "GaugePriority" SG_ 1136 Gear 2;
+BA_ "GaugeKey" SG_ 1137 AcceleratorPedal "pedal";
+BA_ "GaugeKey" SG_ 1784 FuelLevelPercent0 "fuel";
+VAL_ 880 CombinedSelector 0 "N" -1 "R" -2 "P" -3 "Unknown" -4 "D" -5 "S" -6 "M" -7 "L" -8 "Overdrive" ;
+VAL_ 880 CombinedGear 1 "1" 2 "2" 3 "3" 4 "4" 5 "5" 6 "6" 7 "7" 8 "8" 9 "9" 10 "10" 0 "N" -1 "R" -2 "P" -3 "Unknown" -4 "Drive" -5 "Sport" -6 "Manual" -7 "Low" -8 "Overdrive" ;
+VAL_ 1136 GearSelectorPosition 0 "N" -1 "R" -2 "P" -3 "Unknown" -4 "D" -5 "S" -6 "M" -7 "L" -8 "Overdrive" ;
+VAL_ 1136 Gear 1 "1" 2 "2" 3 "3" 4 "4" 5 "5" 6 "6" 7 "7" 8 "8" 9 "9" 10 "10" 0 "N" -1 "R" -2 "P" -3 "Unknown" -4 "Drive" -5 "Sport" -6 "Manual" -7 "Low" -8 "Overdrive" ;
+VAL_ 1138 CruiseControllerState 0 "Disabled" 1 "Inactive" 2 "Cruising" 3 "Accelerating" 4 "Decelerating" 5 "Cancelling" 6 "Disabling" ;
+VAL_ 1139 CutPercentageMethod 0 "No Cut" 1 "Fuel" 2 "Ignition" 3 "Fuel and Ignition" ;
+VAL_ 1776 TyrePressureFL 0 "Error" ;
+VAL_ 1776 TyrePressureFR 0 "Error" ;
+VAL_ 1776 TyrePressureRL 0 "Error" ;
+VAL_ 1776 TyrePressureRR 0 "Error" ;
+VAL_ 1777 TyreTempFL 0 "Error" ;
+VAL_ 1777 TyreTempFR 0 "Error" ;
+VAL_ 1777 TyreTempRL 0 "Error" ;
+VAL_ 1777 TyreTempRR 0 "Error" ;
+VAL_ 1780 EngineState 0 "Stopped" 1 "Cranking" 2 "Idling" 3 "Running" 4 "Limiting" ;
+VAL_ 1791 TorqueConverterPressure 0 "Error" ;
+VAL_ 1791 TransferCasePressure 0 "Error" ;
+VAL_ 1791 AirConPressure 0 "Error" ;
+VAL_ 1791 PowerSteeringPressure 0 "Error" ;
