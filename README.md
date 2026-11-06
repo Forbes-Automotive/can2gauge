@@ -197,7 +197,7 @@ to its main value, never take them away.
 
 ### The Menu
 
-Hold the screen for 2 s (or swipe up / down) for the menu: one item per screen with an icon and a **live status**.
+Hold the screen for 1.5 s (or swipe up / down) for the menu: one item per screen with an icon and a **live status**.
 Swipe for the next, tap to open, hold or wait 10 s to go back. The items are the Settings > Device > Menu and Tabs
 switches, in the same order: Gauges, Navigation, CAN Bus, Haldex, ADC, usb2ip, K-Line, Oil, Gearbox, Bluetooth OBD,
 Triggers, Daisy Chain, Output and Drag Timer, then Settings. A switch off hides the item and its web
@@ -339,10 +339,10 @@ the gauge's own.
 | Idle / Running / Sprinting | An rpm page: under 1300, 1300-4800, over 4800 rpm |
 | **REDLINE** | Over 6500 rpm: Rev bounces off the limiter |
 | **BOOST** | Over 1.4 bar: Rev inflates |
-| **PSSH** | Boost falling fast: the blow-off, on any page |
+| **PSSH** | Boost falling fast: the blow-off |
 | **LOCK** | A Haldex page: Rev braces, LOCK slams in at 92 % |
-| Oil hot / cold | Over 125 °C or under 20 °C, on any page |
-| Screensaver | The car still and the screen untouched |
+| Your reaction | A sprite page's value past its Redline, above or below: Redline, Thirsty, Low Battery, Overcharged, Overheating, Cold, Panic, Flinch or Boost, picked per page |
+| Screensaver | The car still and the screen untouched; Rev reacts to low fuel, a low battery, hot and cold |
 | Goodbye | Ignition off on permanent power: Rev waves, yawns and lies down |
 
 <p align="center">
@@ -1098,7 +1098,8 @@ Still to be checked on a real car or bench:
 - **OBDb** ([github.com/OBDb](https://github.com/OBDb), CC BY-SA 4.0): the DID library, shared under the same licence.
 - **OBDex** ([github.com/foerbsnavi/OBDex](https://github.com/foerbsnavi/OBDex), CC0): the fault code descriptions.
 - **Waveshare ESP32-S3-Touch-LCD-2.1** (MIT): the ST7701S start-up sequence and display pin map the board started from.
-- **NefMoto ME7 flasher** (GPLv3): the read path behind the ME7 flash dump, ported read-only.
+- **NefMoto ME7 flasher** ([github.com/NefMoto/NefMotoOpenSource](https://github.com/NefMoto/NefMotoOpenSource), GPLv3):
+  the read path behind the ME7 flash dump, ported read-only.
 - **LVGL**, **NimBLE-Arduino**, **ESPAsyncWebServer / AsyncTCP** (mathieucarbou) and **ArduinoJson**.
 - **uPlot** (Leon Sorokin, MIT): the Log tab's graphs.
 - **Espressif esp-bsp / esp_lvgl_port** (Apache-2.0): the ESP32-S3 SIMD blend routines.
