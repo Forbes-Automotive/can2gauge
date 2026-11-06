@@ -1,5 +1,68 @@
-# can2gauge 52 mm housing CT V4.2: Saef SFTO210XC-7478A-CT touch panel
+# can2gauge 52 mm housing CT V4.5: Saef SFTO210XC-7478A-CT touch panel
 
+## CT V4.5 (6 Nov 2026): bezel brought in over the empty glass
+
+The panels have arrived and fit well. The only change in this version is the bezel.
+
+- **The bezel window is Ø54.4, down from Ø68.0.** That's the touch area (VA 53.88) plus 0.26 mm a side. The bezel now covers the lens's empty black border, and the whole display area (AA 53.28) stays clear.
+- The 0.6 × 45° chamfer on the window edge stays, so the edge doesn't shadow the display at an angle.
+- The lip still clamps the lens at its outer edge with the 0.1 mm bead. The overall size is unchanged at Ø79.2.
+- **Body, cap and bracket are identical to V4.4.** If those are already printed, just reprint the bezel.
+
+![bezel V4.4 vs V4.5](can2gauge_CT_V4-5_bezel.png)
+
+Print `can2gauge_52mm_STL_CT_V4-5.zip` (`pod13.py` is inside: `ENC_RES=0.2 python pod13.py out/`; the bezel is meshed at `ENC_RES=0.15`).
+
+---
+
+# CT V4.4 notes
+## CT V4.4 (6 Nov 2026): tall PCB tabs, inserts recessed from the front, USB-C flush with the cap
+
+- **PCB raised further: 3.2 mm behind V3.9 / V4.2 in total.** The USB-C now finishes flush with the back face of the cap. The cap back and the tube end stay where V3.10 / V4.3 had them, and the cap floor sits 1.7 mm closer to the PCB.
+- **Tall tabs, 6.0 mm**, up from 3.6. From the front they go:
+  1. a **Ø4.6 × 0.6 recess**. The insert sits 0.6 mm below the tab face, and any plastic that wells up while pressing stays in the recess, so nothing stands proud towards the screen;
+  2. the **Ø3.2 × 3.0 insert pocket** (M2 × 3), with a 0.3 mm lead-in at its mouth;
+  3. a **1.2 mm melt trap** past the insert, for the plastic pushed ahead of it;
+  4. a **1.2 mm solid shoulder** at the PCB face (Ø2.4 screw clearance). The screw pulls the insert back against it.
+- Clearances: the tab face is 1.0 mm from the panel's worst-case back face, and the insert is 1.6 mm from it.
+- **Screws: still M2 × 14** through the cap posts. The tip finishes at the front of the insert, so the full 3 mm is engaged.
+- **Cap:** still clear of all three JST plugs, the USB-C (its slot now cuts through the skirt too), the ESP32 module and J_LCD. The bracket bosses inside the cap clear the module by 1.5 mm.
+- **Head:** 14.6 mm deep at the dash face, because the ribbon's backward run grows with the PCB. The bracket legs are regenerated to suit.
+- **Ribbon:** the datasheet figures say this uses all the slack (the model route needs 27.5 mm against 26.9 nominal / 26.4 worst case). You've seen the real slack, so I've built it as asked. Check it on the first fit, and if it's tight I'll pull the PCB back towards the screen in that version.
+- Still M2, rev15 board.
+- The bezel, lens recess and slim head are unchanged.
+
+![tab sections and cap](can2gauge_V3-11_CT_V4-4_tall_tabs.png)
+
+**Assembly:** press the inserts into the tabs from the front, down to the floor of the recess. Then fit the panel and bezel, then the PCB and cap with 3 × M2 × 14.
+
+Print `can2gauge_52mm_STL_CT_V4-4.zip` (`pod12.py` is inside: `ENC_RES=0.2 python pod12.py out/`; bezel at `ENC_RES=0.15`).
+
+---
+
+# CT V4.3 notes
+## CT V4.3 (6 Nov 2026): bosses raised, inserts from the front, cap clears the JST plug
+
+- **PCB raised 1.5 mm (bosses further back).** The screen PCB sits 1.5 mm further from the panel, which the ribbon slack allows.
+  - The three bosses now stand clear of the panel. Their front faces are 1.7 mm behind the panel's worst-case back face.
+  - **The M2 × 3 inserts go in from the front**, from the glass side before the panel is fitted. The pocket (Ø3.2 × 3.0, with a 0.3 mm lead-in) is open at the boss front, so the melt has room to go and isn't trapped behind plastic.
+  - The screw pulls the insert back against a 0.6 mm shoulder at the PCB face (Ø2.4 screw clearance), so it can't pull through.
+  - **Screws are now M2 × 14** from the back through the cap posts. That gives the full 3 mm in the insert, with the tip 0.1 mm past the insert front and well clear of the panel. M2 × 12 would only reach about 1 mm into the insert.
+  - Ribbon: needs 25.8 mm of the worst-case 26.4 (0.6 mm slack; 1.1 mm at the nominal 26.9 length).
+  - The head is 1.5 mm deeper (dash face at z 12.9).
+- **Cap skirt cleared for the JST plug.** The cap's inner skirt clipped the corner of the J_BUS1 plug. The plug windows now cut through the skirt as well, and a check of all three plug bodies against the cap shows no overlap.
+- **Still M2 for now**, still drilled for the rev15 board. Everything else is as before.
+- The bezel, lens recess and slim head are unchanged from V4.2.
+
+![boss sections and cap skirt](can2gauge_V3-10_CT_V4-3_bosses_cap.png)
+
+**Assembly change:** press the three inserts into the bosses **from the front**, flush with the boss face, before the panel goes in. Then fit the panel, snap on the bezel, and fit the PCB and cap with 3 × M2 × 14.
+
+Print `can2gauge_52mm_STL_CT_V4-3.zip` (`pod11.py` is inside: `ENC_RES=0.2 python pod11.py out/`; bezel meshed at `ENC_RES=0.15`).
+
+---
+
+# CT V4.2 notes
 ## V4.2 (29 Oct 2026): bezel back, ribbon cavity opened
 
 - **Snap-on full-face bezel is back.** No tape: the lens sits straight on the recess floor (recess now 0.70 deep, so the lens front is flush). The bezel clamps it.

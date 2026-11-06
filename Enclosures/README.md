@@ -1,5 +1,50 @@
-# can2gauge 52 mm housing V3.9 — Saef 2.1" round panel (non-touch), V3.4 board (rev15, M2 holes)
+# can2gauge 52 mm housing V3.11 — Saef 2.1" round panel (non-touch), V3.4 board (rev15, M2 holes)
 
+## V3.11 (6 Nov 2026): tall PCB tabs, inserts recessed from the front, USB-C flush with the cap
+
+- **PCB raised further: 3.2 mm behind V3.9 / V4.2 in total.** The USB-C now finishes flush with the back face of the cap. The cap back and the tube end stay where V3.10 / V4.3 had them, and the cap floor sits 1.7 mm closer to the PCB.
+- **Tall tabs, 6.0 mm**, up from 3.6. From the front they go:
+  1. a **Ø4.6 × 0.6 recess**. The insert sits 0.6 mm below the tab face, and any plastic that wells up while pressing stays in the recess, so nothing stands proud towards the screen;
+  2. the **Ø3.2 × 3.0 insert pocket** (M2 × 3), with a 0.3 mm lead-in at its mouth;
+  3. a **1.2 mm melt trap** past the insert, for the plastic pushed ahead of it;
+  4. a **1.2 mm solid shoulder** at the PCB face (Ø2.4 screw clearance). The screw pulls the insert back against it.
+- Clearances: the tab face is 0.7 mm from the panel's worst-case back face, and the insert is 1.3 mm from it.
+- **Screws: still M2 × 14** through the cap posts. The tip finishes at the front of the insert, so the full 3 mm is engaged.
+- **Cap:** still clear of all three JST plugs, the USB-C (its slot now cuts through the skirt too), the ESP32 module and J_LCD. The bracket bosses inside the cap clear the module by 1.5 mm.
+- **Head:** 13.0 mm deep at the dash face, because the ribbon's backward run grows with the PCB. The bracket legs are regenerated to suit.
+- **Ribbon:** the datasheet figures say this uses all the slack (the model route needs 26.9 mm against 26.6 nominal). You've seen the real slack, so I've built it as asked. Check it on the first fit, and if it's tight I'll pull the PCB back towards the screen in that version.
+- Still M2, rev15 board.
+
+![tab sections and cap](can2gauge_V3-11_CT_V4-4_tall_tabs.png)
+
+**Assembly:** press the three inserts into the tabs from the front, down to the floor of the recess, before the panel goes in.
+
+Print `can2gauge_52mm_STL_V3-11.zip` (`pod7d.py` is inside: `ENC_RES=0.2 python pod7d.py out/`).
+
+---
+
+# V3.10 notes
+## V3.10 (6 Nov 2026): bosses raised, inserts from the front, cap clears the JST plug
+
+- **PCB raised 1.5 mm (bosses further back).** The screen PCB sits 1.5 mm further from the panel, which the ribbon slack allows.
+  - The three bosses now stand clear of the panel. Their front faces are 1.4 mm behind the panel's worst-case back face.
+  - **The M2 × 3 inserts go in from the front**, from the glass side before the panel is fitted. The pocket (Ø3.2 × 3.0, with a 0.3 mm lead-in) is open at the boss front, so the melt has room to go and isn't trapped behind plastic.
+  - The screw pulls the insert back against a 0.6 mm shoulder at the PCB face (Ø2.4 screw clearance), so it can't pull through.
+  - **Screws are now M2 × 14** from the back through the cap posts. That gives the full 3 mm in the insert, with the tip 0.1 mm past the insert front and well clear of the panel. M2 × 12 would only reach about 1 mm into the insert.
+  - Ribbon: needs 25.2 mm of 26.6, so 1.35 mm of slack is left.
+  - The head is 1.5 mm deeper (dash face at z 11.3).
+- **Cap skirt cleared for the JST plug.** The cap's inner skirt clipped the corner of the J_BUS1 plug. The plug windows now cut through the skirt as well, and a check of all three plug bodies against the cap shows no overlap.
+- **Still M2 for now**, still drilled for the rev15 board. Everything else is as before.
+
+![boss sections and cap skirt](can2gauge_V3-10_CT_V4-3_bosses_cap.png)
+
+**Assembly change:** press the three inserts into the bosses **from the front** (glass side), flush with the boss face, before the panel goes in.
+
+Print `can2gauge_52mm_STL_V3-10.zip` (`pod7c.py` is inside: `ENC_RES=0.2 python pod7c.py out/`).
+
+---
+
+# V3.9 notes
 ## V3.9 (29 Oct 2026): ribbon cavity opened into the bore
 
 The ribbon cavity under the neck used to stop just short of the +z drop to the connector. That left a small ledge between the cavity and the bore on each side of the drop. The wide part of the ribbon (IC + pads) bowed into those two edges.

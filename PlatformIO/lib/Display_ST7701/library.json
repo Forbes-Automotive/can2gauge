@@ -1,1 +1,0 @@
-{ "name": "Display_ST7701", "version": "1.0.0", "description": "2.1in 480x480 ST7701S RGB panel (3-wire SPI init + esp_lcd RGB) and AL8860 backlight for can2gauge. Init sequence from Garage Tinkering's UGB firmware (MIT).", "frameworks": "arduino", "platforms": "espressif32" }

@@ -1,1 +1,0 @@
-{ "name": "KLine", "version": "1.0.0", "description": "K-line transport (L9637D) + KWP1281 and KWP2000/ISO14230 OBD stacks for can2gauge", "frameworks": "arduino", "platforms": "espressif32" }

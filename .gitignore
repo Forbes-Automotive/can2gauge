@@ -7,3 +7,14 @@ sdkconfig.can2gauge
 compile_commands.json
 __pycache__/
 *.pyc
+
+# Held back until version 1.00: the firmware source stays off GitHub
+PlatformIO/
+src/
+include/
+lib/
+data/
+dbc/
+tools/
+sim/
+docs/

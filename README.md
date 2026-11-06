@@ -7,8 +7,7 @@ phone over WiFi: no laptop, no app. With the optional **can2gauge Link** Android
 next turn**.
 
 Built as the companion display for [OpenHaldex](#openhaldex), it works just as well as a boost / oil / coolant gauge
-on any car with a CAN bus or an OBD port. ESP32-S3 (16 MB flash, 8 MB PSRAM), Arduino and **LVGL 9**; firmware, web
-UI, PCB and enclosure are all open source.
+on any car with a CAN bus or an OBD port. ESP32-S3 (16 MB flash, 8 MB PSRAM), Arduino and **LVGL 9**.
 
 <p align="center">
   <img src="images/unit-iso.png" alt="The assembled can2gauge: 52 mm gauge body, bezel and the round screen showing the RPM needle page" width="430">
@@ -21,9 +20,9 @@ UI, PCB and enclosure are all open source.
 ![can2gauge web UI: OEM oil, DSG, ADC expander, triggers, output, ME7, daisy chain and boot logos](images/can2gaugeUI-2.png)
 
 > [!NOTE]
-> **Status (firmware 0.39.7, not yet released; board V3.4 "V1.0").** The board is routed and reviewed and the
-> firmware is feature complete for a first release. Some paths still need their first test on a real car: see
-> [Status and Bench Items](#status-and-bench-items).
+> **Status: beta (firmware 0.45.1; board V3.4 "V1.0").** The board is routed and reviewed, and the firmware is out with
+> one tester ahead of version 1.00. Some paths still need their first test on a real car: see
+> [Status and Bench Items](#status-and-bench-items). The firmware's source code will be published here with version 1.00.
 
 ---
 
@@ -463,8 +462,9 @@ A Bluetooth LE or WiFi **ELM327-type** adapter gives the gauge the car's data wi
 The wired CAN, the gauge's K-line and the dongle share one PID picker:
 
 - **Every standard PID up to 0x60** (80 values) can go on a page, by any route. Only the PIDs the ECU has are asked for.
-- **Fast** PIDs (rpm, boost, speed, throttle, timing, lambda, and the page on screen) are asked every time; the rest
-  take turns.
+- **The gauge on screen goes first**: on a CAN car its PIDs are in every request, on the K-line it gets 3 requests in 4.
+  The other **fast** PIDs (rpm, boost, speed, throttle, timing, lambda) share what's left; the rest take turns.
+- **While logging**, every logged PID gets the same share instead (see [Data Logger](#data-logger)).
 - **Throttle follows the pedal** when the engine reports a pedal PID: on a diesel the throttle valve PID is the intake
   flap, which sits mostly open whatever your foot does. Otherwise it's the throttle valve, as before.
 - **OBD-II over CAN** (CAN tab) adds PIDs next to a VAG or MaxxECU profile, for values the car's frames don't carry.
@@ -505,7 +505,8 @@ PIDs, DIDs or measuring blocks. Ignition on; it takes from a few seconds to a fe
 4. **Modules** that answer UDS (engine, gearbox, AWD, brakes ...; BMW's by name, DME, EGS, KOMBI ...), listed as
    **Engine (diagnostics)**, **Gearbox (diagnostics)** ... A VW on 29-bit OBD (the 2025 Tiguan) is asked at the
    addresses its OBD answers on, so its engine and DSG lists are found there. Then each
-   module's **DIDs** from the library: only the ones that answer with enough data are kept. BMW modules through a dongle
+   module's **DIDs** from the library, three at a time to rule out the missing ones quickly (one at a time on a module
+   that doesn't take that): only the ones that answer with enough data are kept. BMW modules through a dongle
    need one that takes extended addressing (many cheap clones don't). A VW engine that answers like a **Simos 18**
    (EA888 gen 3 on MQB: Golf R / GTI, S3, TT ...) gets the Simos 18 list instead: 46 values (boost, AFR, knock per
    cylinder, turbo speed, fuel pressures, the torque model ...) with names and scaling proven on these engines. Putting
@@ -641,6 +642,8 @@ The **Log** tab records up to **16 values**, **1 to 50 times a second**, from an
 
 - **Active Gauges** (default) logs whatever your pages show; **Chosen Below** logs the 16 you pick.
 - **Start / Stop**, or **Auto Start** at power-up.
+- **An even log**: while recording, each OBD value in the log gets the same share of the requests, along with the gauge
+  on screen, so no channel is favoured. When recording stops, the gauge on screen goes first again.
 - Up to 4 MB in memory: about 1 h 40 min of 16 values at 10 a second; then the oldest are overwritten. A power cut
   loses it, so download first.
 - **Graphs** on one time line, live while recording, with zoom, a cursor and min / average / max.
@@ -715,8 +718,15 @@ Almost everything is set in the web UI and saved on the gauge; Settings > Device
 - **The output**: high-side or low-side, Off / On or Auto (triggers), with a fault light. Held off in standby.
 - **Themes**, **boot logos**, **brightness**, **swipe animation** and the WiFi name and password.
 - **Menu and Tabs**: hide what your car doesn't have; the screen's menu item and the web UI tab go together.
-- **Units**: speed, boost, pressure, temperature, mixture (lambda / AFR) and distance, each metric or imperial. The
-  dials follow, and every gauge's range is converted.
+- **Units**: **Metric (UK)** by default (mph, miles, mpg, litres, °C, oil in bar, boost in psi), or Metric, Imperial, or
+  each of speed, boost, pressure, temperature, mixture (lambda / AFR), distance, fuel economy and fuel in tank on its own.
+  The dials follow, and every gauge's range is converted.
+- **Peak marker**: every gauge marks its highest reading and shows it as text, kept from power-up whether the gauge is on
+  show or not. Double-tap a gauge to start its peak again, or **Clear Peaks** for all of them. It can be switched off.
+- **Touch timing**: **Long press** and **Double tap** times on the Display tab (Advanced).
+- **Haldex quick settings**: a single tap on the Haldex gauge or the menu's Haldex screen, with an OpenHaldex heard over
+  WiFi: pick the **generation** and press Set, or tap **Learn** twice to start a learn (both with the car stopped). It
+  also shows whether the OpenHaldex is in standalone, which one is linked, and **re-scans** for another.
 - **Your own DBC** and your own **label file** per module.
 
 ---
@@ -724,7 +734,8 @@ Almost everything is set in the web UI and saved on the gauge; Settings > Device
 ## Web Interface
 
 Join the gauge's WiFi, **`can2gauge-XXXX`** (no password until you set one), and open **`http://192.168.1.1`** or
-**`http://c2g.local`**. Changes save automatically. Phones keep their mobile data while connected.
+**`http://c2g.local`**. Changes save automatically. Phones keep their mobile data while connected. With nobody using it,
+the WiFi sleeps until you open the menu on the screen (**WiFi stays on** in Settings > WiFi turns this off).
 
 The same pages work on a phone and a laptop. On a phone the tabs fold into a menu button, grouped as Live, Car Data,
 Set Up and Tools.
@@ -1019,6 +1030,13 @@ A new firmware has to confirm itself within 60 s or the gauge rolls back.
 > **0.39.0 and 0.39.2 put every setting back to its default** (the saved settings' layout changed). Before updating,
 > press **Download Backup** (Settings > Device); after the update, **Import Backup** puts them all back.
 
+> [!WARNING]
+> **0.39.8 and later have to go on by USB once, with an erase**, not over WiFi: the gauge's settings store was made
+> bigger, which changes how the flash is laid out. The erase removes settings, the OBD dongle's pairing, uploaded files
+> and the last car scan, so press **Download Backup** first and **Import Backup** afterwards.
+
+If the gauge ever can't save its settings, the web UI shows a red warning under the top bar until a save works.
+
 **Gauge to gauge**: update one gauge, then press **Update All Gauges** on the Daisy Chain tab of any gauge (the one
 your phone is on will do). The gauge with the newest firmware updates the others over WiFi one at a time (about a
 minute each), sending only the files that differ; a file that arrives damaged is sent again; a power cut leaves a
@@ -1030,8 +1048,8 @@ gauge on its old firmware. The car must be parked.
 
 Still to be checked on a real car or bench:
 
-- **Board bring-up**: first picture on the screen 2026-10-26; touch is untested (the supplied screens have no touch
-  chip), and the sprite frame rate (6-8 fps so far) is being worked on.
+- **Board bring-up**: first picture on the screen 2026-10-26; touch panels now fitted; the sprite frame rate (6-8 fps so
+  far) is being worked on.
 - **OBD speed**: wired OBD-II polling on a car, and both **Fast OBD** options (off by default until then).
 - **Dongle paths**: TP2.0 and K-line through the adapter, WiFi adapters, and a CAN car through a dongle.
 - **K-line**: the ME7 Fast logger on more ECUs, the flash read on an unmodified ECU, KWP2000 VAG blocks, and the cluster
@@ -1063,15 +1081,14 @@ Still to be checked on a real car or bench:
   pages (0.39.6), and the adapter's K-line bench test at 33.
 - **First Boot setting up the other gauges** (0.38.7): two or three new gauges in a row, set up from one; each on its
   own start page, the others' First Boot questions gone.
-- **0.38.3 bug fixes** (docs/bug_review_2026-11-03.md): a deep-sleep wake on CAN, outputs and triggers through standby,
-  (the page rebuild during a screen animation: fixed in 0.38.8 and passed tools/diag/anim_rebuild_test.py on the
-  bench, 2026-11-03).
+- **0.38.3 bug fixes**: a deep-sleep wake on CAN, outputs and triggers through standby (the page rebuild during a screen
+  animation: fixed in 0.38.8 and passed its bench test, 2026-11-03).
 - **Screen rotation** frame-rate cost, and **units** on the screen.
 - **The new menu items** (0.39.2): Navigation's Off / Pop Up / Route by a tap and by a swipe (the phone link starting
   and stopping), the nav card's long press back to the gauges, Route staying away for the rest of a route; usb2ip, Oil
   (the K-line cluster session opening from the menu) and Triggers on a car.
 - **Marks after the nav card**: two small marks on the left of the RPM dial after Show Test Turn, and the band colour
-  at the bottom of the card. tools/diag/screen_grab.py (USB) shows whether they're in the picture or only on the glass.
+  at the bottom of the card.
 
 ---
 

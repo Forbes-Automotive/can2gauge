@@ -3,6 +3,23 @@
   "latest": "0.39.7",
   "releases": [
     {
+      "version": "0.45.1",
+      "channel": "beta",
+      "date": "2026-11-06",
+      "ota": false,
+      "notes": "Beta. Install by USB from the Forbes Automotive updater page, not over WiFi: the flash layout changed in 0.39.8, so this erases the gauge. Press Download Backup (Settings > Device) first, then Import Backup after. New since 0.39.7: touch screen support, peak marker on every gauge, Metric (UK) units, simpler sprite reactions, WiFi sleep, Haldex quick settings, faster Scan My Car, many fixes.",
+      "firmware": {
+        "path": "V0.45.1/firmware.bin",
+        "size": 3323536,
+        "sha256": "edd6cc1eaf0b97b251a37fadc5df058e4316502faf2a1ce8b455aa3dc37b2f07"
+      },
+      "filesystem": {
+        "path": "V0.45.1/littlefs.bin",
+        "size": 9764864,
+        "sha256": "074416f0d397a88f27de2784caf6c06b59ee5b4e94ed7b44b9ff92fa38d2a122"
+      }
+    },
+    {
       "version": "0.39.7",
       "channel": "stable",
       "date": "2026-11-03",
