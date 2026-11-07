@@ -242,7 +242,7 @@ temperature and level; **Triggers** each trigger, fired or what it reads now.
 - **Double-tap** for the **scoreboard**: the best 10 times, with **Clear Scores** (tap it twice). The Log tab in the
   web UI shows them too, with **Delete** for one time and **Clear All**.
 
-Screens without touch: **Dashboard > Gauge Control** (Advanced) works the screen the way a finger would. **Previous
+From your phone: **Dashboard > Gauge Control** (Advanced) works the screen the way a finger would. **Previous
 Gauge** / **Next Gauge** swipe (pages, or the menu's items), and **Single Tap**, **Double Tap** and **Long Press** press
 the middle. So Long Press, Next Gauge to Drag Timer, Single Tap goes in, and the same buttons run it.
 
@@ -949,7 +949,7 @@ A Ø48 mm, 4-layer board behind the screen, with all the plugs and the USB-C on 
 | MCU | ESP32-S3-WROOM-1-**N16R8**, USB-C, BOOT / RESET | USB console |
 | CAN | TCAN1044V, PESD2CAN, switched 120 Ω | Classic CAN only |
 | I/O expander | TCA9554 | LCD and touch reset, termination, output, dash-light and fault inputs |
-| Display | YouriTech ET021CR01-Z, 2.1" 480 × 480 ST7701S | Touch pins wired for a touch version |
+| Display | Saef SFTO210XC-7478A-CT, 2.1" 480 × 480 ST7701S | CST826 capacitive touch |
 | Backlight | AL8860 constant-current **from 12 V** | Stays dark on USB power alone |
 | Output | DRV8876 half-bridge | High- **or** low-side, 1.5 A limit, protected |
 | K-line | L9637D, tester pull-up | Fast enough for ME7 at 56000 baud |
@@ -1006,8 +1006,9 @@ chain (or leave it on Auto).
 
 ### The 52 mm Housing
 
-A standard 52 mm DIN gauge: a Ø51.8 body, a Ø76.4 head carrying the screen, a rear cap with a window per plug, and a
-U-bracket. Printable in PETG or ASA; the files and assembly notes are in [Enclosures/](Enclosures/README.md).
+A standard 52 mm DIN gauge: a Ø51.8 body, a Ø76 head carrying the touch screen under a snap-on Ø79.2 bezel, a rear cap
+with a window per plug, and a U-bracket. Printable in PETG or ASA; the files and assembly notes are in
+[Enclosures/](Enclosures/README_CT.md).
 
 <p align="center">
   <img src="images/unit-front.png" alt="The gauge from the front: bezel ring and the round screen" width="400">
