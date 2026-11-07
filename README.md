@@ -930,9 +930,9 @@ into the rear cap.
   <img src="images/unit-turntable.gif" alt="The assembled gauge turning: the screen, the side with the head and body, the rear cap with the plugs and the U-bracket" width="360">
 </p>
 
-![Rear of the gauge: J_BUS1, J_BUS2 and J_OUT through their windows, USB-C, BOOT and RESET pin holes, power LED, three M2 screws and the two M3 bracket studs](images/unit-rear.png)
+![Rear of the gauge: J_BUS1, J_BUS2 and J_OUT through their windows, USB-C, BOOT and RESET pin holes, power LED, three M2 screws and the two M3 bracket inserts](images/unit-rear.png)
 
-![Exploded view: U-bracket, M2 screws, rear cap, PCB, head and body, the 2.1-inch screen and the bezel ring](images/unit-exploded.png)
+![Exploded view: U-bracket, M2 screws, rear cap, PCB, head and body, the 2.1-inch touch screen and the snap-on bezel](images/unit-exploded.png)
 
 ### The Board
 
@@ -1011,7 +1011,7 @@ with a window per plug, and a U-bracket. Printable in PETG or ASA; the files and
 [Enclosures/](Enclosures/README_CT.md).
 
 <p align="center">
-  <img src="images/unit-front.png" alt="The gauge from the front: bezel ring and the round screen" width="400">
+  <img src="images/unit-front.png" alt="The gauge from the front: full-face bezel and the round touch screen" width="400">
   &nbsp;
   <img src="images/unit-open.png" alt="Rear cap off: the ESP32-S3 module, J_LCD flex connector, USB-C, BOOT / RESET and the three plugs inside the body" width="400">
 </p>
