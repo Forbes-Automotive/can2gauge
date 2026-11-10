@@ -20,9 +20,8 @@ on any car with a CAN bus or an OBD port. ESP32-S3 (16 MB flash, 8 MB PSRAM), Ar
 ![can2gauge web UI: OEM oil, DSG, ADC expander, triggers, output, ME7, daisy chain and boot logos](images/can2gaugeUI-2.png)
 
 > [!NOTE]
-> **Status: beta (firmware 0.45.1; board V3.4 "V1.0").** The board is routed and reviewed, and the firmware is out with
-> one tester ahead of version 1.00. Some paths still need their first test on a real car: see
-> [Status and Bench Items](#status-and-bench-items). The firmware's source code will be published here with version 1.00.
+> **Status: firmware 1.0.0, the first full release (board V3.4 "V1.0").** Some paths still need their first test on a
+> real car: see [Status and Bench Items](#status-and-bench-items). The firmware's source code will be published here.
 
 ---
 

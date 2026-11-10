@@ -3,6 +3,23 @@
   "latest": "0.39.7",
   "releases": [
     {
+      "version": "1.0.0",
+      "channel": "stable",
+      "date": "2026-11-10",
+      "ota": false,
+      "notes": "Version 1.0.0, the first full release. Install by USB from the Forbes Automotive updater page: coming from 0.39.7 or older the flash layout changes, so this erases the gauge. Press Download Backup (Settings > Device) first, then Import Backup after. New since 0.45.1: gauge fonts (VDO, Smiths, Stack, Defi, Digital LCD and car-maker styles), pull-down quick actions (layout, peaks, sprite, units), Update Now on the glass for the daisy chain, faster shared settings across the chain, the screen's dashed lines fixed, VAG PQ intake temp and boost from Motor_3 / Motor_7, gear decoding checked for VAG PQ / MQB and the BMW 8HP, Scan My Car fills the gauges from a scan.",
+      "firmware": {
+        "path": "V1.0.0/firmware.bin",
+        "size": 3338400,
+        "sha256": "4c60481cd699dae98ebf7309e72baa70482c5a8fc7ea0d8d54defc5e5c8de95f"
+      },
+      "filesystem": {
+        "path": "V1.0.0/littlefs.bin",
+        "size": 9764864,
+        "sha256": "8e8ff5d4251befb20a2e1cd8e1762beace30a17538415078658f47117b1eaa62"
+      }
+    },
+    {
       "version": "0.45.1",
       "channel": "beta",
       "date": "2026-11-06",
