@@ -147,6 +147,8 @@ by its place in the row. The gauges need the same firmware first (Daisy Chain > 
 takes the next number. It ends by itself once all have one (or **Done**, or **Cancel** to keep the old numbers). The
 numbers decide each gauge's start page and the order of the row wave.
 
+![Tap to Number: Set Numbers on the Daisy Chain screen, the ? card, the first gauge numbered 1, done, then the row's circles 1 and 2](images/glass-numbering.png)
+
 ---
 
 ## Using It
@@ -194,6 +196,10 @@ Pull down on a gauge page:
 
 It saves and closes with **Back**, a hold, or after 10 s.
 
+<p align="center">
+  <img src="images/glass-quick.png" alt="Quick actions on the BOOST page: Layout Arc, Peak Values On, Sprite Off, Units bar, and Back" width="280">
+</p>
+
 ### The Menu
 
 Pull up (or hold) for the menu: one item per screen with a live status. Swipe for the next, tap to open, hold or wait
@@ -234,6 +240,12 @@ web UI tab too).
 - **Screen rotation**: **Upside Down**, and **Rotation Trim** (±15°) for a gauge that sits crooked. Touch follows.
 
 In a daisy chain, theme, font, brightness, units and boot logo are shared: change them on any gauge.
+
+<details>
+<summary>The number fonts</summary>
+
+![The RPM needle page in the standard font and the nine gauge fonts: VDO, Smiths, Stack / Autometer, Defi, Digital LCD, VW, Audi, BMW and Ford](images/glass-fonts.png)
+</details>
 
 ![The RPM needle page in twelve themes: Forbes teal, VW blue, VW green, Audi red, BMW amber, Skoda green, Mercedes, Porsche, Mazda red, Subaru red, Nissan amber, Saab green](images/glass-themes.png)
 
@@ -461,6 +473,10 @@ can2gauge started as the OpenHaldex companion display.
 - Lock target and actual, mode and more over **CAN** or **WiFi** (OpenHaldex broadcasts it with no pairing).
 - **Swipe** the Haldex screen to change mode. **Tap** a Haldex page for its quick settings: the **generation** (Set),
   **Learn**, **Standalone** and **Use CAN** (two taps each, car stopped), and which OpenHaldex is linked.
+
+<p align="center">
+  <img src="images/glass-hdxquick.png" alt="Haldex quick settings: Generation 1, Learn, Linked: OpenHaldex-C6, Standalone and Use CAN" width="280">
+</p>
 
 ### Gearbox
 
